@@ -3,6 +3,10 @@
     "name": "tourify-mobile",
     "slug": "tourify-mobile",
     "version": "1.0.0",
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -17,8 +21,9 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       }
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    }
+    "plugins": [
+      "expo-image",
+      "expo-splash-screen"
+    ]
   }
 }
