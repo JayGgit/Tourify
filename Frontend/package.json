@@ -7,8 +7,11 @@
     "@react-navigation/bottom-tabs": "^7.18.18",
     "@react-navigation/native": "^7.3.18",
     "expo": "~57.0.21",
+    "expo-image": "~57.0.5",
     "expo-navigation-bar": "~57.0.2",
+    "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~57.0.1",
+    "expo-symbols": "~57.0.3",
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-draggable-flatlist": "^4.0.3",
@@ -21,8 +24,10 @@
     "start": "expo start",
     "server": "node server.js",
     "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "ios": "expo start --ios"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "typescript": "~6.0.3"
+  }
 }
