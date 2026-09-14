@@ -1,10 +1,11 @@
+const dotenv = require('dotenv').config();
 const express = require('express');
 const app = express();
 const port = 3000;
 const axios = require("axios");
 
-// const API_KEY = process.env.YELP_API_KEY;
-async function getRestaurants() {
+const API_KEY = process.env.YELP_API_KEY;
+async function getPlaces(location) {
   try {
     const response = await axios.get(
       "https://api.yelp.com/v3/businesses/search",
@@ -13,26 +14,24 @@ async function getRestaurants() {
           Authorization: `Bearer ${API_KEY}`,
         },
         params: {
-          term: "restaurants",
-          location: "Los Angeles, CA",
+          location: location,
           limit: 10,
         },
       }
     );
 
-    console.log(response.data.businesses);
-  } catch (error) {
-    console.error(
-      error.response?.data || error.message
-    );
+    return response.data.businesses;
+  } 
+catch (error) {
+    return error;
   }
 }
 
-// getRestaurants();
+// getPlaces();
 
-app.get('/fyp', (req, res) => {
+app.get('/fyp', async (req, res) => {
     // res.send('theres no way were getting this done in a week')
-    res.send(getRestaurants());
+    res.send(await getPlaces(req.query.location));
 })
 
 app.get('/', (req, res) => {
