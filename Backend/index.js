@@ -20,22 +20,36 @@ async function getPlaces(location) {
       }
     );
 
-    return response.data.businesses;
-  } 
-catch (error) {
-    return error;
+    return response.data.businesses.map((business) => ({
+      id: business.id,
+      name: business.name,
+      category: business.categories?.[0]?.title ?? "Unknown",
+      img: business.image_url,
+      stars: business.rating,
+      reviewAmt: business.review_count,
+      lat: business.coordinates?.latitude,
+      long: business.coordinates?.longitude,
+      description: business.location?.display_address?.join(", ") ?? "",
+    }));
+  }
+  catch (error) {
+    throw error;
   }
 }
 
 // getPlaces();
 
 app.get('/fyp', async (req, res) => {
-    // res.send('theres no way were getting this done in a week')
-    res.send(await getPlaces(req.query.location));
+  try {
+    res.json(await getPlaces(req.query.location));
+  } catch (error) {
+    console.error('Failed to fetch recommended places:', error.message);
+    res.status(502).json({ error: 'Failed to fetch recommended places' });
+  }
 })
 
 app.get('/', (req, res) => {
-    res.send('Gerald says hi!');
+  res.send('Gerald says hi!');
 });
 
 app.listen(port, () => {
