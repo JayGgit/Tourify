@@ -20,9 +20,17 @@ async function getPlaces(location) {
       }
     );
 
-    return response.data.businesses;
-  } 
-catch (error) {
+    return response.data.businesses.map((business) => ({
+      name: business.name,
+      rating: business.rating,
+      address: business.location.address1,
+      city: business.location.city,
+      state: business.location.state,
+      zip_code: business.location.zip_code,
+      phone: business.phone,
+      url: business.url,
+    }));
+  } catch (error) {
     return error;
   }
 }
