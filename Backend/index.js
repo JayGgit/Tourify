@@ -6,6 +6,10 @@ const axios = require("axios");
 
 const API_KEY = process.env.YELP_API_KEY;
 async function getPlaces(location) {
+  let offset = parseInt(Math.random() * 230);
+
+  console.log(offset)
+
   try {
     const response = await axios.get(
       "https://api.yelp.com/v3/businesses/search",
@@ -16,6 +20,7 @@ async function getPlaces(location) {
         params: {
           location: location,
           limit: 10,
+          offset: offset,
         },
       }
     );
