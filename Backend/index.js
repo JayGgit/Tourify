@@ -5,7 +5,7 @@ const port = 3000;
 const axios = require("axios");
 
 const API_KEY = process.env.YELP_API_KEY;
-async function getPlaces(location) {
+async function getPlaces(location, query) {
   let offset = parseInt(Math.random() * 230);
 
   console.log(offset)
@@ -18,6 +18,7 @@ async function getPlaces(location) {
           Authorization: `Bearer ${API_KEY}`,
         },
         params: {
+          term: query,
           location: location,
           limit: 10,
           offset: offset,
@@ -46,11 +47,16 @@ async function getPlaces(location) {
 
 app.get('/fyp', async (req, res) => {
   try {
-    res.json(await getPlaces(req.query.location));
+    res.json(await getPlaces(req.query.location, req.query.query));
   } catch (error) {
     console.error('Failed to fetch recommended places:', error.message);
     res.status(502).json({ error: 'Failed to fetch recommended places' });
   }
+})
+
+app.get('/account/:id', async (req, res) => {
+  let id = req.params.id;
+  
 })
 
 app.get('/', (req, res) => {
