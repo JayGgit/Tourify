@@ -14,9 +14,11 @@ async function getPlaces(location, term) {
           Authorization: `Bearer ${API_KEY}`,
         },
         params: {
+          term: query,
           location: location,
           term: term,
           limit: 10,
+          offset: offset,
         },
       }
     );
