@@ -46,24 +46,19 @@ async function getPlaces(location, term) {
   }
 }
 
-async function getBusinessDetails(businessId) {
+async function getBusinessURL(businessId) {
   try {
     const response = await axios.get(
-      "https://api.yelp.com/v3/businesses/${businessId}",
+      `https://api.yelp.com/v3/businesses/${encodeURIComponent(businessId)}`,
       {
         headers: {
           Authorization: `Bearer ${API_KEY}`,
         },
-        params: {
-          businessId: businessId,
-        },
       }
     );
-    return response.data.businesses.map((business) => ({
-      description: business.description,
-    }));
+    return response.data.url;
   } catch (error) {
-    return error;
+    throw error;
   }
 }
 
@@ -76,8 +71,20 @@ app.get('/fyp', async (req, res) => {
   }
 })
 
-app.get('/fypDetails', async (req, res) => {
-    res.send(await getBusinessDetails(req.query.businessId));
+app.get('/fypURL', async (req, res) => {
+    res.send(await getBusinessURL(req.query.businessId));
+    // if (!req.query.businessId) {
+    //   return res.status(400).json({ error: 'businessId is required' });
+    // }
+
+    // try {
+    //   res.json(await getBusinessURL(req.query.businessId));
+    // } catch (error) {
+    //   console.error('Failed to fetch business URL:', error.response?.data ?? error.message);
+    //   res.status(error.response?.status ?? 500).json({
+    //     error: error.response?.data ?? 'Failed to fetch business URL',
+    //   });
+    // }
 })
 app.get('/', (req, res) => {
   res.send('Gerald says hi!');
