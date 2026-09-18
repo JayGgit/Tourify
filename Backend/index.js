@@ -14,7 +14,6 @@ async function getPlaces(location, term) {
           Authorization: `Bearer ${API_KEY}`,
         },
         params: {
-          term: query,
           location: location,
           term: term,
           limit: 10,
@@ -65,6 +64,9 @@ async function getBusinessURL(businessId) {
 }
 
 app.get('/fyp', async (req, res) => {
+  if (!req.query.location) {
+    return res.status(400).send("Missing location parameter");
+  }
   try {
     res.json(await getPlaces(req.query.location, req.query.term));
   } catch (error) {
