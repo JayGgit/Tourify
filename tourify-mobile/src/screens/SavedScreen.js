@@ -2,13 +2,11 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, FlatList, Pressable } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import { useSavedPlaces } from '../context/SavedPlacesContext';
-import { usePlanner } from '../context/PlannerContext';
 import { useTheme } from '../context/ThemeContext';
 
 export default function SavedScreen() {
   const [query, setQuery] = useState('');
   const { savedPlaces, removeSavedPlace } = useSavedPlaces();
-  const { addToPlanner, isInPlanner } = usePlanner();
   const { theme } = useTheme();
 
   const filteredPlaces = useMemo(() => {
@@ -44,13 +42,6 @@ export default function SavedScreen() {
       </View>
       <Text style={[styles.rating, { color: theme.mutedText }]}>⭐ {place.rating}</Text>
       <Text style={[styles.notes, { color: theme.mutedText }]}>{place.notes}</Text>
-      <Pressable
-        style={[styles.planButton, isInPlanner(place.id) && styles.addedPlanButton]}
-        onPress={() => addToPlanner(place)}
-        disabled={isInPlanner(place.id)}
-      >
-        <Text style={styles.planButtonText}>{isInPlanner(place.id) ? 'Added to plan' : 'Add to plan'}</Text>
-      </Pressable>
     </View>
   );
 
@@ -196,21 +187,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     color: '#475569',
-  },
-  planButton: {
-    backgroundColor: '#4C6FFF',
-    borderRadius: 12,
-    alignItems: 'center',
-    paddingVertical: 12,
-    marginTop: 16,
-  },
-  addedPlanButton: {
-    backgroundColor: '#173B30',
-  },
-  planButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
   },
   emptyState: {
     backgroundColor: '#fff',
