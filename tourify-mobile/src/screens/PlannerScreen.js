@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
-import { Alert } from 'react-native';
-import { View, Text, StyleSheet, Pressable, TextInput, KeyboardAvoidingView, Platform, Linking, Modal } from 'react-native';
+import { View, Text, StyleSheet, Pressable, TextInput, KeyboardAvoidingView, Platform, Linking } from 'react-native';
 import DraggableFlatList from 'react-native-draggable-flatlist';
-import { Swipeable } from 'react-native-gesture-handler';
 import ScreenContainer from '../components/ScreenContainer';
-import { usePlanner } from '../context/PlannerContext';
+import { plannerItems as initialPlannerItems } from '../data/profile';
 import { useTheme } from '../context/ThemeContext';
 
 function timeToMinutes(time) {
@@ -26,12 +24,10 @@ function sortByTime(items) {
 }
 
 export default function PlannerScreen() {
+  const [items, setItems] = useState(() => sortByTime(initialPlannerItems));
   const [editingId, setEditingId] = useState(null);
   const [draftTime, setDraftTime] = useState('');
   const [timeError, setTimeError] = useState('');
-  const [showSavedPlans, setShowSavedPlans] = useState(false);
-  const [showHidden, setShowHidden] = useState(false);
-  const { items, setItems, hiddenItems, savedPlans, savePlan, removeFromPlanner, hideFromPlanner, restoreHidden } = usePlanner();
   const { theme } = useTheme();
 
   const startEditingTime = (item) => {
@@ -57,32 +53,15 @@ export default function PlannerScreen() {
     Linking.openURL('https://www.google.com/maps').catch(() => {});
   };
 
-  const handleSavePlan = () => {
-    savePlan();
-    Alert.alert('Plan saved', `${items.length} stops are saved to your day planner.`);
-  };
-
-  const renderSwipeActions = (item) => (
-    <View style={styles.swipeActions}>
-      <Pressable style={styles.hideButton} onPress={() => hideFromPlanner(item.id)}>
-        <Text style={styles.actionText}>Hide</Text>
-      </Pressable>
-      <Pressable style={styles.deleteButton} onPress={() => removeFromPlanner(item.id)}>
-        <Text style={styles.actionText}>Delete</Text>
-      </Pressable>
-    </View>
-  );
-
   const renderItem = ({ item, drag, isActive }) => (
-    <Swipeable renderRightActions={() => renderSwipeActions(item)}>
-      <Pressable
-        onLongPress={drag}
-        style={[
-          styles.planCard,
-          { backgroundColor: theme.surface, borderColor: theme.border },
-          isActive && { backgroundColor: theme.elevatedSurface },
-        ]}
-      >
+    <Pressable
+      onLongPress={drag}
+      style={[
+        styles.planCard,
+        { backgroundColor: theme.surface, borderColor: theme.border },
+        isActive && { backgroundColor: theme.elevatedSurface },
+      ]}
+    >
       <View style={styles.timeRow}>
         {editingId === item.id ? (
           <View style={styles.timeEditor}>
@@ -113,8 +92,7 @@ export default function PlannerScreen() {
       <View style={[styles.badge, { backgroundColor: theme.elevatedSurface }]}><Text style={[styles.badgeText, { color: theme.text }]}>{item.category}</Text></View>
       <Text style={[styles.planTitle, { color: theme.text }]}>{item.title}</Text>
       <Text style={[styles.note, { color: theme.mutedText }]}>{item.note}</Text>
-      </Pressable>
-    </Swipeable>
+    </Pressable>
   );
 
   return (
@@ -134,56 +112,15 @@ export default function PlannerScreen() {
             <View>
               <Text style={[styles.eyebrow, { color: theme.mutedText }]}>Your itinerary</Text>
               <Text style={[styles.title, { color: theme.text }]}>Day Planner</Text>
-              <View style={styles.topActions}>
-                <Pressable style={styles.utilityButton} onPress={() => setShowSavedPlans(true)}>
-                  <Text style={styles.utilityText}>View saved plans</Text>
-                </Pressable>
-                <Pressable style={[styles.utilityButton, { backgroundColor: theme.elevatedSurface }]} onPress={() => setShowHidden((current) => !current)}>
-                  <Text style={[styles.utilityText, { color: theme.text }]}>Hidden ({hiddenItems.length})</Text>
-                </Pressable>
-              </View>
-              {showHidden && hiddenItems.length > 0 ? (
-                <View style={[styles.hiddenPanel, { backgroundColor: theme.elevatedSurface }]}>
-                  <Text style={[styles.panelTitle, { color: theme.text }]}>Hidden places</Text>
-                  {hiddenItems.map((item) => (
-                    <View key={item.id} style={styles.hiddenRow}>
-                      <Text style={[styles.hiddenName, { color: theme.text }]}>{item.title}</Text>
-                      <Pressable style={styles.restoreButton} onPress={() => restoreHidden(item.id)}>
-                        <Text style={styles.restoreText}>Restore</Text>
-                      </Pressable>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
             </View>
           )}
           ListFooterComponent={(
             <View style={styles.buttonRow}>
-              <Pressable style={styles.primaryButton} onPress={handleSavePlan}>
-                <Text style={styles.primaryText}>Save Plan</Text>
-              </Pressable>
+              <Pressable style={styles.primaryButton}><Text style={styles.primaryText}>Save Plan</Text></Pressable>
               <Pressable style={[styles.secondaryButton, { backgroundColor: theme.elevatedSurface }]} onPress={openMaps}><Text style={[styles.secondaryText, { color: theme.text }]}>Open in Maps</Text></Pressable>
             </View>
           )}
         />
-        <Modal visible={showSavedPlans} animationType="slide" transparent onRequestClose={() => setShowSavedPlans(false)}>
-          <View style={styles.modalBackdrop}>
-            <View style={[styles.modalCard, { backgroundColor: theme.surface }]}>
-              <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: theme.text }]}>Saved plans</Text>
-                <Pressable onPress={() => setShowSavedPlans(false)}><Text style={[styles.closeText, { color: theme.text }]}>Close</Text></Pressable>
-              </View>
-              {savedPlans.length === 0 ? (
-                <Text style={[styles.emptyText, { color: theme.mutedText }]}>No saved plans yet.</Text>
-              ) : savedPlans.map((plan) => (
-                <View key={plan.id} style={[styles.savedPlanRow, { borderColor: theme.border }]}>
-                  <Text style={[styles.savedPlanTitle, { color: theme.text }]}>{new Date(plan.savedAt).toLocaleString()}</Text>
-                  <Text style={[styles.savedPlanMeta, { color: theme.mutedText }]}>{plan.items.length} stops</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        </Modal>
       </KeyboardAvoidingView>
     </ScreenContainer>
   );
@@ -204,55 +141,6 @@ const styles = StyleSheet.create({
     color: '#152033',
     marginBottom: 18,
   },
-  topActions: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
-  },
-  utilityButton: {
-    backgroundColor: '#4C6FFF',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  utilityText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  hiddenPanel: {
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 16,
-  },
-  panelTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    marginBottom: 10,
-  },
-  hiddenRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  hiddenName: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    marginRight: 10,
-  },
-  restoreButton: {
-    backgroundColor: '#4C6FFF',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  restoreText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
   listContent: {
     paddingBottom: 16,
   },
@@ -268,30 +156,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
-  },
-  swipeActions: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    marginBottom: 16,
-    borderRadius: 18,
-    overflow: 'hidden',
-  },
-  hideButton: {
-    width: 76,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#64748B',
-  },
-  deleteButton: {
-    width: 82,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#B91C1C',
-  },
-  actionText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
   },
   activeCard: {
     backgroundColor: '#EEF4FF',
@@ -405,47 +269,5 @@ const styles = StyleSheet.create({
     color: '#152033',
     fontSize: 16,
     fontWeight: '700',
-  },
-  modalBackdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-  },
-  modalCard: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 20,
-    minHeight: 240,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 18,
-  },
-  modalTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  closeText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  savedPlanRow: {
-    borderBottomWidth: 1,
-    paddingVertical: 13,
-  },
-  savedPlanTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  savedPlanMeta: {
-    fontSize: 13,
-    marginTop: 4,
-  },
-  emptyText: {
-    fontSize: 15,
-    textAlign: 'center',
-    marginTop: 20,
   },
 });
