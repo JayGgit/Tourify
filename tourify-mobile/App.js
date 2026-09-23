@@ -11,14 +11,13 @@ import ForYouScreen from './src/screens/ForYouScreen';
 import SavedScreen from './src/screens/SavedScreen';
 import PlannerScreen from './src/screens/PlannerScreen';
 import { SavedPlacesProvider } from './src/context/SavedPlacesContext';
-import { PlannerProvider } from './src/context/PlannerContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import LoginScreen from './src/screens/LoginScreen';
 
 const Tab = createBottomTabNavigator();
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(__DEV__);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loggedInEmail, setLoggedInEmail] = useState('');
 
   useEffect(() => {
@@ -34,16 +33,14 @@ export default function App() {
       <SafeAreaProvider>
         <ThemeProvider>
           <SavedPlacesProvider>
-            <PlannerProvider>
-              {isLoggedIn ? (
-                <AppNavigator email={loggedInEmail} />
-              ) : (
-                <LoginScreen onLogin={(email) => {
-                  setLoggedInEmail(email);
-                  setIsLoggedIn(true);
-                }} />
-              )}
-            </PlannerProvider>
+            {isLoggedIn ? (
+              <AppNavigator email={loggedInEmail} />
+            ) : (
+              <LoginScreen onLogin={(email) => {
+                setLoggedInEmail(email);
+                setIsLoggedIn(true);
+              }} />
+            )}
           </SavedPlacesProvider>
         </ThemeProvider>
       </SafeAreaProvider>
@@ -75,11 +72,8 @@ function AppNavigator({ email }) {
               tabBarInactiveTintColor: '#7B8794',
               headerShown: false,
               tabBarStyle: {
-                backgroundColor: theme.mode === 'dark' ? 'rgba(21, 25, 34, 0.88)' : 'rgba(255, 255, 255, 0.82)',
+                backgroundColor: theme.surface,
                 borderTopColor: theme.border,
-                borderTopWidth: 1,
-                shadowOpacity: 0.08,
-                elevation: 0,
                 height: 62 + insets.bottom,
                 paddingBottom: insets.bottom + 6,
                 paddingTop: 10,

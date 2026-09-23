@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, FlatList, Dimensions, Image, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, FlatList, Dimensions } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import { useSavedPlaces } from '../context/SavedPlacesContext';
 import { useTheme } from '../context/ThemeContext';
 import { ErrorState, LoadingState } from '../components/LoadState';
 import { getRecommendedPlaces } from '../services/placesApi';
-import { userProfile } from '../data/profile';
 
 const { height } = Dimensions.get('window');
 const cardHeight = height * 0.68;
@@ -14,8 +13,6 @@ export default function ForYouScreen() {
   const [data, setData] = useState([]);
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState('');
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
   const { isSaved, savePlace } = useSavedPlaces();
   const { theme } = useTheme();
 
@@ -24,30 +21,11 @@ export default function ForYouScreen() {
     setError('');
 
     try {
-      setData(await getRecommendedPlaces('LosAngeles', 0, userProfile));
-      setHasMore(true);
+      setData(await getRecommendedPlaces());
       setStatus('success');
     } catch (loadError) {
       setError(loadError.message);
       setStatus('error');
-    }
-  };
-
-  const loadMorePlaces = async () => {
-    if (status !== 'success' || isLoadingMore || !hasMore) return;
-
-    setIsLoadingMore(true);
-    try {
-      const nextPlaces = await getRecommendedPlaces('LosAngeles', data.length, userProfile);
-      const existingIds = new Set(data.map((place) => place.id));
-      const uniquePlaces = nextPlaces.filter((place) => !existingIds.has(place.id));
-
-      setData((currentPlaces) => [...currentPlaces, ...uniquePlaces]);
-      setHasMore(uniquePlaces.length > 0);
-    } catch (loadError) {
-      setError(loadError.message);
-    } finally {
-      setIsLoadingMore(false);
     }
   };
 
@@ -60,11 +38,7 @@ export default function ForYouScreen() {
 
   const renderItem = ({ item }) => (
     <View style={[styles.placeCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-      {item.imageUrl ? (
-        <Image source={{ uri: item.imageUrl }} style={styles.image} resizeMode="cover" />
-      ) : (
-        <View style={[styles.image, { backgroundColor: item.color }]} />
-      )}
+      <View style={[styles.image, { backgroundColor: item.color }]} />
       <View style={[styles.content, { backgroundColor: theme.surface }]}>
         <View style={styles.headerRow}>
           <Text style={[styles.name, { color: theme.text }]}>{item.name}</Text>
@@ -102,29 +76,23 @@ export default function ForYouScreen() {
       style={{ backgroundColor: theme.background }}
       contentStyle={styles.feedContent}
     >
-      <View style={styles.feedLayout}>
-        <View style={styles.feedHeader}>
-          <Text style={[styles.eyebrow, { color: theme.mutedText }]}>Recommended for you</Text>
-          <Text style={[styles.title, { color: theme.text }]}>For You</Text>
-        </View>
-
-        <FlatList
-          style={styles.feed}
-          data={data}
-          keyExtractor={(item, index) => `${item.id}-${index}`}
-          renderItem={renderItem}
-          onEndReached={loadMorePlaces}
-          onEndReachedThreshold={0.6}
-          ListFooterComponent={isLoadingMore ? <ActivityIndicator style={styles.footer} color={theme.mutedText} /> : null}
-          ListEmptyComponent={<Text style={[styles.emptyText, { color: theme.mutedText }]}>No recommendations found.</Text>}
-          pagingEnabled
-          showsVerticalScrollIndicator={false}
-          snapToInterval={cardHeight + 12}
-          snapToAlignment="start"
-          decelerationRate="fast"
-          contentContainerStyle={styles.feedList}
-        />
+      <View style={styles.feedHeader}>
+        <Text style={[styles.eyebrow, { color: theme.mutedText }]}>Recommended for you</Text>
+        <Text style={[styles.title, { color: theme.text }]}>For You</Text>
       </View>
+
+      <FlatList
+        style={styles.feed}
+        data={data}
+        keyExtractor={(item, index) => `${item.id}-${index}`}
+        renderItem={renderItem}
+        pagingEnabled
+        showsVerticalScrollIndicator={false}
+        snapToInterval={cardHeight + 12}
+        snapToAlignment="start"
+        decelerationRate="fast"
+        contentContainerStyle={styles.feedList}
+      />
     </ScreenContainer>
   );
 }
@@ -147,9 +115,6 @@ const styles = StyleSheet.create({
   feedList: {
     paddingBottom: 8,
   },
-  footer: {
-    marginVertical: 16,
-  },
   feed: {
     flex: 1,
   },
@@ -158,17 +123,10 @@ const styles = StyleSheet.create({
     paddingTop: 0,
     paddingBottom: 0,
   },
-  feedLayout: {
-    flex: 1,
-  },
   feedHeader: {
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 6,
-  },
-  emptyText: {
-    padding: 20,
-    textAlign: 'center',
   },
   placeCard: {
     backgroundColor: '#fff',

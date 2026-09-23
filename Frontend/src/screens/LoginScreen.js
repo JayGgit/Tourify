@@ -1,60 +1,79 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, Pressable, StyleSheet, Platform, Alert } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { API_URL } from '../config';
 
 export default function LoginScreen({ onLogin }) {
-  const [mode, setMode] = useState('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
 
-  const handleSubmit = async () => {
-    const normalizedEmail = email.trim();
+  useEffect(() => {
+    checkAppleAuthAvailability();
+  }, []);
 
-    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setError('Enter a valid email address.');
+  const checkAppleAuthAvailability = async () => {
+    try {
+      const isAvailable = await AppleAuthentication.isAvailableAsync();
+      setAppleAuthAvailable(isAvailable);
+    } catch (e) {
+        // For testing in Expo Go, assume available
+        // Remove this in production!
+        setAppleAuthAvailable(true);
+      }
+    };
+
+  const handleAppleSignIn = async () => {
+    if (Platform.OS !== 'ios') {
+      Alert.alert('Apple Sign In', 'Apple Sign In is only available on iOS devices.');
       return;
     }
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
+    if (!appleAuthAvailable) {
+      Alert.alert('Not Available', 'Apple Sign In is not available on this device.');
       return;
     }
 
-    if (mode === 'register' && password !== confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-
+    setIsLoading(true);
     setError('');
-    setIsSubmitting(true);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
 
     try {
-      const response = await fetch(`${API_URL}/${mode === 'register' ? 'register' : 'login'}`, {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      // Send the Apple identity token to your backend for verification
+      const response = await fetch(`${API_URL}/auth/apple`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: normalizedEmail, password }),
-        signal: controller.signal,
+        body: JSON.stringify({
+          identityToken: credential.identityToken,
+          authorizationCode: credential.authorizationCode,
+          fullName: credential.fullName,
+          email: credential.email,
+          user: credential.user,
+        }),
       });
+
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || 'Unable to authenticate.');
+        throw new Error(result.error || 'Apple authentication failed.');
       }
 
-      onLogin(result.email);
+      onLogin(result.email || credential.email || `apple_${credential.user}`);
     } catch (requestError) {
-      setError(requestError.name === 'AbortError'
-        ? 'The auth server did not respond. Start npm run server and try again.'
-        : requestError.message || 'Unable to reach the server.');
+      if (requestError.code === 'ERR_CANCELED') {
+        // User cancelled the sign in flow
+        return;
+      }
+      setError(requestError.message || 'Unable to sign in with Apple. Please try again.');
     } finally {
-      clearTimeout(timeout);
-      setIsSubmitting(false);
+      setIsLoading(false);
     }
   };
 
@@ -63,82 +82,51 @@ export default function LoginScreen({ onLogin }) {
       <View style={styles.brandMark}>
         <Text style={styles.brandMarkText}>T</Text>
       </View>
-      <Text style={styles.eyebrow}>{mode === 'register' ? 'Create your account' : 'Welcome to Tourify'}</Text>
-      <Text style={styles.title}>{mode === 'register' ? 'Start planning your way.' : 'Plan trips that feel like you.'}</Text>
+      <Text style={styles.eyebrow}>Welcome to Tourify</Text>
+      <Text style={styles.title}>Plan trips that feel like you.</Text>
       <Text style={styles.subtitle}>
-        {mode === 'register'
-          ? 'Create an account to save places and build your personalized itinerary.'
-          : 'Sign in to save places and build your personalized itinerary.'}
+        Sign in to save places and build your personalized itinerary.
       </Text>
 
       <View style={styles.form}>
-        <Text style={styles.label}>Email address</Text>
-        <TextInput
-          value={email}
-          onChangeText={(value) => {
-            setEmail(value);
-            if (error) setError('');
-          }}
-          placeholder="you@example.com"
-          placeholderTextColor="#94A3B8"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="email"
-          style={[styles.input, error && styles.inputError]}
-          onSubmitEditing={handleSubmit}
-          returnKeyType="continue"
-        />
-        <Text style={styles.label}>Password</Text>
-        <TextInput
-          value={password}
-          onChangeText={(value) => {
-            setPassword(value);
-            if (error) setError('');
-          }}
-          placeholder="At least 8 characters"
-          placeholderTextColor="#94A3B8"
-          secureTextEntry
-          autoCapitalize="none"
-          style={[styles.input, error && styles.inputError]}
-          onSubmitEditing={handleSubmit}
-          returnKeyType={mode === 'register' ? 'next' : 'done'}
-        />
-        {mode === 'register' ? (
-          <>
-            <Text style={styles.label}>Confirm password</Text>
-            <TextInput
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              placeholder="Re-enter your password"
-              placeholderTextColor="#94A3B8"
-              secureTextEntry
-              autoCapitalize="none"
-              style={[styles.input, error && styles.inputError]}
-              onSubmitEditing={handleSubmit}
-              returnKeyType="done"
-            />
-          </>
-        ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <Pressable style={styles.button} onPress={handleSubmit}>
-          <Text style={styles.buttonText}>{isSubmitting ? 'Connecting...' : mode === 'register' ? 'Create account' : 'Log in'}</Text>
-        </Pressable>
+        {appleAuthAvailable ? (
+          <Pressable style={styles.appleButton} onPress={handleAppleSignIn} disabled={isLoading}>
+            <View style={styles.appleButtonContent}>
+              <Text style={styles.appleIcon}></Text>
+              <Text style={styles.appleButtonText}>
+                {isLoading ? 'Signing in...' : 'Continue with Apple'}
+              </Text>
+            </View>
+          </Pressable>
+        ) : (
+          <View style={styles.unavailableContainer}>
+            <Text style={styles.unavailableText}>
+              {Platform.OS != 'ios'
+                ? 'Apple Sign In is not available on this device.'
+                : 'Apple Sign In is only available on iOS devices.'}
+            </Text>
+            <Text style={styles.unavailableHint}>
+              Please use an iOS device to sign in with Apple.
+            </Text>
+                    {__DEV__ && Platform.OS === 'ios' && (
+                      <Pressable style={[styles.appleButton, styles.testButton]} onPress={handleAppleSignIn} disabled={isLoading}>
+                        <View style={styles.appleButtonContent}>
+                          <Text style={styles.appleIcon}></Text>
+                          <Text style={styles.appleButtonText}>
+                            {isLoading ? 'Signing in...' : 'Test Apple Sign In (Dev)'}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    )}
+                  </View>
+                )}
       </View>
 
-      <Pressable
-        style={styles.modeButton}
-        onPress={() => {
-          setMode(mode === 'login' ? 'register' : 'login');
-          setError('');
-        }}
-      >
-        <Text style={styles.modeText}>
-          {mode === 'login' ? 'Need an account? Create one' : 'Already have an account? Log in'}
-        </Text>
-      </Pressable>
-      <Text style={styles.helper}>Passwords are stored as secure hashes on the local server.</Text>
+      <Text style={styles.helper}>
+        Your data is securely stored and never shared.
+      </Text>
     </ScreenContainer>
   );
 }
@@ -196,50 +184,53 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
   },
-  label: {
-    color: '#334155',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  input: {
-    height: 52,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
+  appleButton: {
+    backgroundColor: '#000000',
     borderRadius: 12,
-    paddingHorizontal: 14,
-    color: '#152033',
-    fontSize: 16,
-    marginBottom: 10,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
   },
-  inputError: {
-    borderColor: '#DC2626',
+    testButton: {
+      backgroundColor: '#4C6FFF',
+      marginTop: 12,
+    },
+  appleButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  appleIcon: {
+    fontSize: 20,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  appleButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  unavailableContainer: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  unavailableText: {
+    color: '#DC2626',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  unavailableHint: {
+    color: '#94A3B8',
+    fontSize: 13,
+    textAlign: 'center',
   },
   error: {
     color: '#B91C1C',
     fontSize: 13,
     marginBottom: 10,
-  },
-  button: {
-    backgroundColor: '#4C6FFF',
-    borderRadius: 12,
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  modeButton: {
-    alignItems: 'center',
-    marginTop: 18,
-  },
-  modeText: {
-    color: '#3557D8',
-    fontSize: 14,
-    fontWeight: '700',
+    textAlign: 'center',
   },
   helper: {
     color: '#94A3B8',

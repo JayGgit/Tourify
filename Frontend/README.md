@@ -19,3 +19,5 @@ Use the Expo CLI prompts to open the app on a development build, Android emulato
 - `src/screens` - tab screen implementations
 - `src/context` - shared application state and theme providers
 - `src/services` - API integrations
+
+The For You feed loads recommendations from `http://34.201.233.58:3000/fyp`. Its `query` parameter is generated automatically from the profile interests and preferences; users do not enter it. To use a different endpoint, set `EXPO_PUBLIC_FYP_API_URL` in `Frontend/.env.local`.
