@@ -17,7 +17,7 @@ import LoginScreen from './src/screens/LoginScreen';
 const Tab = createBottomTabNavigator();
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(__DEV__);
   const [loggedInEmail, setLoggedInEmail] = useState('');
 
   useEffect(() => {
