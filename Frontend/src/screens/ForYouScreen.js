@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, FlatList, Dimensions, Image, ActivityIndicator } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, FlatList, Dimensions, Image, ActivityIndicator, Modal, ScrollView, Linking } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import { useSavedPlaces } from '../context/SavedPlacesContext';
 import { useTheme } from '../context/ThemeContext';
@@ -11,8 +11,59 @@ import Animated, { runOnJS, runOnUI, useSharedValue, useAnimatedStyle, withSprin
 
 const { height, width } = Dimensions.get('window');
 const cardHeight = height * 0.68;
+const menuImageWidth = width - 44;
 
-function DraggableCard({ item, baseColor, onSwipeLeft, onSwipeRight, onSave, children }) {
+function getPlaceHighlights(place) {
+  if (Array.isArray(place?.highlights) && place.highlights.length) return place.highlights;
+
+  return (place?.features || [])
+    .filter((feature) => feature.is_active)
+    .slice(0, 5)
+    .map((feature) => feature.title);
+}
+
+async function getPlaceDetails(place) {
+  const searchParams = new URLSearchParams({
+    engine: 'yelp',
+    find_desc: place.name,
+    find_loc: 'Los Angeles',
+    api_key: process.env.EXPO_PUBLIC_SERPAPI_KEY,
+  });
+  const searchResponse = await fetch(`https://serpapi.com/search.json?${searchParams.toString()}`);
+  if (!searchResponse.ok) {
+    throw new Error(`Place search could not be loaded (${searchResponse.status}).`);
+  }
+
+  const searchJson = await searchResponse.json();
+  const matchingResult = searchJson.organic_results?.find((result) => result.place_ids?.includes(place.id))
+    || searchJson.organic_results?.[0];
+  const placeSlug = matchingResult?.place_ids?.find((placeId) => placeId !== place.id)
+    || matchingResult?.link?.match(/\/biz\/([^?]+)/)?.[1];
+
+  if (!placeSlug) {
+    throw new Error('A Yelp place slug could not be found.');
+  }
+
+  const params = new URLSearchParams({
+    engine: 'yelp_place',
+    place_id: placeSlug,
+    api_key: '14336cfea8cb4690e9e0930b343c1aa86c98205a8c583c1059bddfab9f82d417',
+  });
+  const response = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`Place details could not be loaded (${response.status}).`);
+  }
+
+  const json = await response.json();
+  const yelpBusinessUrl = matchingResult?.link?.split('?')[0]
+    || `https://www.yelp.com/biz/${placeSlug}`;
+  return {
+    ...json.place_results,
+    reviewsUrl: `${yelpBusinessUrl}#reviews`,
+  };
+}
+
+function DraggableCard({ item, baseColor, onSwipeLeft, onSwipeRight, onSave, onPress, dismissPlaceId, children }) {
   const x = useSharedValue(0);
   const y = useSharedValue(0);
   const opacity = useSharedValue(0);
@@ -36,6 +87,10 @@ function DraggableCard({ item, baseColor, onSwipeLeft, onSwipeRight, onSave, chi
       if (finished) runOnJS(onSwipeRight)(item.id);
     });
   };
+
+  useEffect(() => {
+    if (dismissPlaceId === item.id) runOnUI(dismissRight)();
+  }, [dismissPlaceId, item.id]);
 
   const gesture = Gesture.Pan()
     .activeOffsetX([-10, 10])
@@ -73,6 +128,7 @@ function DraggableCard({ item, baseColor, onSwipeLeft, onSwipeRight, onSave, chi
     <GestureDetector gesture={gesture}>
       <Animated.View style={animatedStyle}>
         {children({
+          onPress: () => onPress(item),
           onSkip: () => runOnUI(dismissLeft)(),
           onSave: () => {
             onSave(item);
@@ -91,6 +147,15 @@ export default function ForYouScreen() {
   const [error, setError] = useState('');
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [selectedPlace, setSelectedPlace] = useState(null);
+  const [selectedPlaceDetail, setSelectedPlaceDetail] = useState(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [dismissPlaceId, setDismissPlaceId] = useState(null);
+  const detailCacheRef = useRef({});
+  const detailRequestsRef = useRef({});
+  const placeRequestIdRef = useRef(0);
+  const menuTranslateY = useSharedValue(0);
   const { isSaved, savePlace } = useSavedPlaces();
   const { theme } = useTheme();
 
@@ -134,6 +199,97 @@ export default function ForYouScreen() {
     savePlace(place);
   };
 
+  const closePlaceMenu = () => {
+    placeRequestIdRef.current += 1;
+    setSelectedPlace(null);
+  };
+
+  const loadPlaceDetail = (place) => {
+    if (detailCacheRef.current[place.id]) {
+      return Promise.resolve(detailCacheRef.current[place.id]);
+    }
+
+    if (detailRequestsRef.current[place.id]) {
+      return detailRequestsRef.current[place.id];
+    }
+
+    const request = getPlaceDetails(place)
+      .then((details) => {
+        detailCacheRef.current[place.id] = details;
+        return details;
+      })
+      .finally(() => {
+        delete detailRequestsRef.current[place.id];
+      });
+
+    detailRequestsRef.current[place.id] = request;
+    return request;
+  };
+
+  const handlePlacePress = (place) => {
+    const requestId = placeRequestIdRef.current + 1;
+    const cachedDetails = detailCacheRef.current[place.id];
+    placeRequestIdRef.current = requestId;
+    setSelectedPlace(place);
+    setSelectedPlaceDetail(cachedDetails || null);
+    setIsLoadingDetails(!cachedDetails);
+
+    loadPlaceDetail(place)
+      .then((details) => {
+        if (placeRequestIdRef.current === requestId) setSelectedPlaceDetail(details);
+      })
+      .catch((loadError) => {
+        if (placeRequestIdRef.current === requestId) {
+          console.error(loadError);
+          setSelectedPlaceDetail(null);
+        }
+      })
+      .finally(() => {
+        if (placeRequestIdRef.current === requestId) setIsLoadingDetails(false);
+      });
+  };
+
+  useEffect(() => {
+    if (selectedPlace) menuTranslateY.value = 0;
+  }, [selectedPlace]);
+
+  useEffect(() => {
+    setActiveImageIndex(0);
+  }, [selectedPlace]);
+
+  useEffect(() => {
+    data.slice(0, 3).forEach((place) => {
+      loadPlaceDetail(place).catch(() => {});
+    });
+  }, [data]);
+
+  useEffect(() => {
+    if (!selectedPlace?.id) {
+      setSelectedPlaceDetail(null);
+      setIsLoadingDetails(false);
+    }
+  }, [selectedPlace]);
+
+  const menuGesture = Gesture.Pan()
+    .activeOffsetY([10, 999])
+    .failOffsetX([-30, 30])
+    .onUpdate((event) => {
+      menuTranslateY.value = Math.max(0, event.translationY);
+    })
+    .onEnd((event) => {
+      if (event.translationY > 120) {
+        menuTranslateY.value = withTiming(height, { duration: 180 }, (finished) => {
+          if (finished) runOnJS(closePlaceMenu)();
+        });
+      } else {
+        menuTranslateY.value = withSpring(0);
+      }
+    });
+
+  const menuAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: menuTranslateY.value }],
+  }));
+
   useEffect(() => {
     loadPlaces();
   }, []);
@@ -142,9 +298,10 @@ export default function ForYouScreen() {
   if (status === 'error') return <ErrorState message={error} onRetry={loadPlaces} />;
 
   const renderItem = ({ item }) => (
-    <DraggableCard item={item} baseColor={theme.surface} onSave={handleSave} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeLeft}>
-      {({ onSkip, onSave, swipeFeedbackStyle }) => (
-      <Animated.View style={[styles.placeCard, { backgroundColor: theme.surface, borderColor: theme.border }, isSaved(item.id) && styles.savedCard, swipeFeedbackStyle]}>
+    <DraggableCard item={item} baseColor={theme.surface} onSave={handleSave} onPress={handlePlacePress} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeLeft} dismissPlaceId={dismissPlaceId}>
+      {({ onPress, onSkip, onSave, swipeFeedbackStyle }) => (
+      <Pressable onPress={onPress}>
+        <Animated.View style={[styles.placeCard, { backgroundColor: theme.surface, borderColor: theme.border }, isSaved(item.id) && styles.savedCard, swipeFeedbackStyle]}>
         {item.imageUrl ? (
           <Image source={{ uri: item.imageUrl }} style={styles.image} resizeMode="cover" />
         ) : (
@@ -177,7 +334,8 @@ export default function ForYouScreen() {
             </Pressable>
           </View>
         </Animated.View>
-      </Animated.View>
+        </Animated.View>
+      </Pressable>
       )}
     </DraggableCard>
   );
@@ -209,6 +367,127 @@ export default function ForYouScreen() {
           contentContainerStyle={styles.feedList}
         />
       </View>
+
+      <Modal
+        visible={Boolean(selectedPlace)}
+        transparent
+        animationType="slide"
+        onRequestClose={closePlaceMenu}
+      >
+        <GestureDetector gesture={menuGesture}>
+          <View style={styles.modalRoot}>
+          <Pressable style={styles.modalBackdrop} onPress={closePlaceMenu} />
+            <Animated.View style={[styles.placeMenu, { backgroundColor: theme.surface }, menuAnimatedStyle]}>
+            <View style={[styles.menuHandle, { backgroundColor: theme.border }]} />
+            <View style={styles.menuHeader}>
+              <View style={styles.menuHeading}>
+                <Text style={[styles.menuEyebrow, { color: theme.mutedText }]}>DETAILS</Text>
+                <Text style={[styles.menuTitle, { color: theme.text }]}>
+                  {selectedPlace?.name || 'Place name'}
+                </Text>
+              </View>
+            </View>
+            {isLoadingDetails ? (
+              <View style={[styles.menuImage, styles.loadingImage, { backgroundColor: theme.elevatedSurface }]}>
+                <ActivityIndicator size="large" color={theme.text} />
+              </View>
+            ) : selectedPlaceDetail?.images?.length ? (
+              <>
+                <ScrollView
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.menuImage}
+                  onMomentumScrollEnd={(event) => {
+                    setActiveImageIndex(Math.round(event.nativeEvent.contentOffset.x / menuImageWidth));
+                  }}
+                >
+                  {selectedPlaceDetail.images.map((imageUrl, index) => (
+                    <Image
+                      key={`${imageUrl}-${index}`}
+                      source={{ uri: imageUrl }}
+                      style={[styles.menuImageSlide, { backgroundColor: theme.elevatedSurface }]}
+                      resizeMode="contain"
+                    />
+                  ))}
+                </ScrollView>
+                <View style={styles.imageDots}>
+                  {selectedPlaceDetail.images.map((imageUrl, index) => (
+                    <View
+                      key={`${imageUrl}-dot-${index}`}
+                      style={[styles.imageDot, { backgroundColor: index === activeImageIndex ? theme.text : theme.border }]}
+                    />
+                  ))}
+                </View>
+              </>
+            ) : (
+              <View style={[styles.menuImage, { backgroundColor: selectedPlace?.color || theme.elevatedSurface }]} />
+            )}
+            <Text style={[styles.menuMeta, { color: theme.mutedText }]}>
+              {selectedPlace?.category || 'Category'}  •  {selectedPlaceDetail?.address || selectedPlace?.distance || 'Loading'}
+            </Text>
+            <Text style={[styles.menuContact, { color: theme.mutedText }]}>
+              {selectedPlaceDetail?.phone || 'Phone loading'}  •  {selectedPlaceDetail?.price || 'Price loading'}
+            </Text>
+            <View style={[styles.menuStats, { borderColor: theme.border }]}>
+              <View>
+                <Text style={[styles.statLabel, { color: theme.mutedText }]}>RATING</Text>
+                <Text style={[styles.statValue, { color: theme.text }]}>⭐ {selectedPlaceDetail?.rating || selectedPlace?.rating || 'Loading'}</Text>
+              </View>
+              <View>
+                <Text style={[styles.statLabel, { color: theme.mutedText }]}>REVIEWS</Text>
+                <Pressable
+                  accessibilityRole="link"
+                  disabled={!selectedPlaceDetail?.reviewsUrl}
+                  onPress={() => Linking.openURL(selectedPlaceDetail.reviewsUrl)}
+                >
+                  <Text style={[styles.statValue, selectedPlaceDetail?.reviewsUrl && styles.menuLink, { color: theme.text }]}>
+                    {selectedPlaceDetail?.reviews ? `${selectedPlaceDetail.reviews} reviews` : selectedPlace?.reviews || 'Loading'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+            {selectedPlaceDetail?.full_menu ? (
+              <Pressable
+                accessibilityRole="link"
+                onPress={() => Linking.openURL(selectedPlaceDetail.full_menu)}
+              >
+                <Text style={[styles.menuDetail, styles.menuLink, { color: theme.text }]}>View menu on Yelp</Text>
+              </Pressable>
+            ) : null}
+            <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
+              {selectedPlaceDetail?.website || 'Website loading'}
+            </Text>
+            <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
+              {getPlaceHighlights(selectedPlaceDetail).join(', ') || 'Highlights loading'}
+            </Text>
+            <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
+              {selectedPlaceDetail?.categories?.map((category) => category.title).join(', ') || 'Categories loading'}
+            </Text>
+            <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
+              Hours: {selectedPlaceDetail?.operation_hours?.hours?.[0]?.hours || 'Hours loading'}
+            </Text>
+            <View style={styles.menuActions}>
+              <Pressable style={[styles.menuSecondaryButton, { borderColor: theme.border }]} onPress={closePlaceMenu}>
+                <Text style={[styles.menuSecondaryText, { color: theme.text }]}>Close</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.menuPrimaryButton, isSaved(selectedPlace?.id) && styles.savedButton]}
+                onPress={() => {
+                  if (selectedPlace) {
+                    handleSave(selectedPlace);
+                    setDismissPlaceId(selectedPlace.id);
+                  }
+                  closePlaceMenu();
+                }}
+              >
+                <Text style={styles.menuPrimaryText}>{isSaved(selectedPlace?.id) ? 'Saved' : 'Save place'}</Text>
+              </Pressable>
+            </View>
+            </Animated.View>
+          </View>
+        </GestureDetector>
+      </Modal>
     </ScreenContainer>
   );
 }
@@ -366,6 +645,151 @@ const styles = StyleSheet.create({
   },
   saveText: {
     color: '#fff',
+    fontWeight: '700',
+  },
+  modalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  placeMenu: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: 28,
+  },
+  menuHandle: {
+    alignSelf: 'center',
+    borderRadius: 99,
+    height: 5,
+    marginBottom: 18,
+    width: 42,
+  },
+  menuHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  menuHeading: {
+    flex: 1,
+    marginRight: 16,
+  },
+  menuEyebrow: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    marginBottom: 5,
+  },
+  menuTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+  },
+  closeButton: {
+    alignItems: 'center',
+    borderRadius: 20,
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
+  },
+  closeButtonText: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  menuMeta: {
+    fontSize: 14,
+    marginTop: 8,
+  },
+  menuContact: {
+    fontSize: 14,
+    marginTop: 6,
+  },
+  menuDetail: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 8,
+  },
+  menuLink: {
+    textDecorationLine: 'underline',
+  },
+  menuImage: {
+    aspectRatio: 16 / 9,
+    borderRadius: 14,
+    marginTop: 14,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  menuImageSlide: {
+    aspectRatio: 16 / 9,
+    width: menuImageWidth,
+  },
+  loadingImage: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageDots: {
+    flexDirection: 'row',
+    gap: 5,
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  imageDot: {
+    borderRadius: 4,
+    height: 6,
+    width: 6,
+  },
+  menuStats: {
+    borderBottomWidth: 1,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    gap: 42,
+    marginTop: 20,
+    paddingVertical: 14,
+  },
+  statLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 3,
+  },
+  statValue: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  menuDescription: {
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 16,
+  },
+  menuActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 22,
+  },
+  menuSecondaryButton: {
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    flex: 1,
+    justifyContent: 'center',
+    paddingVertical: 13,
+  },
+  menuSecondaryText: {
+    fontWeight: '700',
+  },
+  menuPrimaryButton: {
+    alignItems: 'center',
+    backgroundColor: '#4C6FFF',
+    borderRadius: 12,
+    flex: 1.3,
+    justifyContent: 'center',
+    paddingVertical: 13,
+  },
+  menuPrimaryText: {
+    color: '#FFFFFF',
     fontWeight: '700',
   },
 });
