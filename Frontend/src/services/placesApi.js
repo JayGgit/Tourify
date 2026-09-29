@@ -39,7 +39,6 @@ function normalizePlace(place, index) {
 }
 
 export async function getRecommendedPlaces(location = 'LosAngeles', offset = 0, profile) {
-  console.log('Fetching recommended places...')
   const params = new URLSearchParams({
     location,
     offset: String(offset),
@@ -51,7 +50,6 @@ export async function getRecommendedPlaces(location = 'LosAngeles', offset = 0, 
     throw new Error(`Recommended places could not be loaded (${response.status}).`);
   }
   const result = await response.json();
-  console.log(result)
   if (!Array.isArray(result)) {
     throw new Error('Recommended places returned an invalid response.');
   }
