@@ -9,6 +9,9 @@ const { MongoClient } = require('mongodb');
 app.use(express.json({ limit: '10kb' }));
 
 let accounts;
+const API_KEY = process.env.YELP_API_KEY;
+async function getPlaces(location) {
+  let offset = parseInt(Math.random() * 230);
 
 function derivePasswordHash(password, salt) {
   return new Promise((resolve, reject) => {
@@ -66,6 +69,14 @@ async function getBusinessURL(businessId) {
   try {
     const response = await axios.get(
       `https://api.yelp.com/v3/businesses/${encodeURIComponent(businessId)}`,
+async function searchPlaces(location, search) {
+  let offset = parseInt(Math.random() * 230);
+
+  console.log(offset)
+
+  try {
+    const response = await axios.get(
+      "https://api.yelp.com/v3/businesses/search",
       {
         headers: {
           Authorization: `Bearer ${API_KEY}`,
@@ -74,6 +85,28 @@ async function getBusinessURL(businessId) {
     );
     return response.data.url;
   } catch (error) {
+        params: {
+          term: search,
+          location: location,
+          limit: 10,
+          offset: offset,
+        },
+      }
+    );
+
+    return response.data.businesses.map((business) => ({
+      id: business.id,
+      name: business.name,
+      category: business.categories?.[0]?.title ?? "Unknown",
+      img: business.image_url,
+      stars: business.rating,
+      reviewAmt: business.review_count,
+      lat: business.coordinates?.latitude,
+      long: business.coordinates?.longitude,
+      description: business.location?.display_address?.join(", ") ?? "",
+    }));
+  }
+  catch (error) {
     throw error;
   }
 }
@@ -83,7 +116,19 @@ app.get('/fyp', async (req, res) => {
     return res.status(400).send("Missing location parameter");
   }
   try {
-    res.json(await getPlaces(req.query.location, req.query.term));
+    res.json(await getPlaces(req.query.location));
+  } catch (error) {
+    console.error('Failed to fetch recommended places:', error.message);
+    res.status(502).json({ error: 'Failed to fetch recommended places' });
+  }
+})
+
+app.get('/search', async (req, res) => {
+  if (!req.query.location || !req.query.search) {
+    return res.status(400).send("Missing location or search query parameters");
+  }
+  try {
+    res.json(await searchPlaces(req.query.location, req.query.search));
   } catch (error) {
     console.error('Failed to fetch recommended places:', error.message);
     res.status(502).json({ error: 'Failed to fetch recommended places' });
