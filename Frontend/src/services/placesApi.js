@@ -49,6 +49,7 @@ export async function getRecommendedPlaces(location = 'LosAngeles', offset = 0, 
   if (!response.ok) {
     throw new Error(`Recommended places could not be loaded (${response.status}).`);
   }
+
   const result = await response.json();
   if (!Array.isArray(result)) {
     throw new Error('Recommended places returned an invalid response.');

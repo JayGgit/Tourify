@@ -298,6 +298,20 @@ export default function ForYouScreen() {
   if (status === 'error') return <ErrorState message={error} onRetry={loadPlaces} />;
 
   const renderItem = ({ item }) => (
+    <View style={[styles.placeCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      {item.imageUrl ? (
+        <Image source={{ uri: item.imageUrl }} style={styles.image} resizeMode="cover" />
+      ) : (
+        <View style={[styles.image, { backgroundColor: item.color }]} />
+      )}
+      <View style={[styles.content, { backgroundColor: theme.surface }]}>
+        <View style={styles.headerRow}>
+          <Text style={[styles.name, { color: theme.text }]}>{item.name}</Text>
+          <Text style={[styles.rating, { color: theme.mutedText, backgroundColor: theme.elevatedSurface }]}>⭐ {item.rating}</Text>
+        </View>
+
+        <Text style={[styles.meta, { color: theme.mutedText }]}>{item.category} • {item.distance}</Text>
+        <Text style={[styles.meta, { color: theme.mutedText }]}>{item.reviews}</Text>
     <DraggableCard item={item} baseColor={theme.surface} onSave={handleSave} onPress={handlePlacePress} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeLeft} dismissPlaceId={dismissPlaceId}>
       {({ onPress, onSkip, onSave, swipeFeedbackStyle }) => (
       <Pressable onPress={onPress}>
@@ -350,6 +364,24 @@ export default function ForYouScreen() {
           <Text style={[styles.eyebrow, { color: theme.mutedText }]}>Recommended for you</Text>
           <Text style={[styles.title, { color: theme.text }]}>For You</Text>
         </View>
+
+        <FlatList
+          style={styles.feed}
+          data={data}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
+          renderItem={renderItem}
+          onEndReached={loadMorePlaces}
+          onEndReachedThreshold={0.6}
+          ListFooterComponent={isLoadingMore ? <ActivityIndicator style={styles.footer} color={theme.mutedText} /> : null}
+          ListEmptyComponent={<Text style={[styles.emptyText, { color: theme.mutedText }]}>No recommendations found.</Text>}
+          pagingEnabled
+          showsVerticalScrollIndicator={false}
+          snapToInterval={cardHeight + 12}
+          snapToAlignment="start"
+          decelerationRate="fast"
+          contentContainerStyle={styles.feedList}
+        />
+      </View>
         <FlatList
           style={styles.feed}
           data={data}
