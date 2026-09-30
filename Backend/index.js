@@ -3,6 +3,21 @@ const express = require('express');
 const app = express();
 const port = 3000;
 const axios = require("axios");
+const crypto = require('node:crypto');
+const { MongoClient } = require('mongodb');
+
+app.use(express.json({ limit: '10kb' }));
+
+let accounts;
+
+function derivePasswordHash(password, salt) {
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 64, (error, hash) => {
+      if (error) reject(error);
+      else resolve(hash);
+    });
+  });
+}
 
 const API_KEY = process.env.YELP_API_KEY;
 async function getPlaces(location, term) {
@@ -94,6 +109,23 @@ app.get('/', (req, res) => {
   res.send('Gerald says hi!');
 });
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+async function startServer() {
+  if (!process.env.MONGODB_URI) {
+    throw new Error('MONGODB_URI is required. Set it in Backend/.env.');
+  }
+
+  const client = new MongoClient(process.env.MONGODB_URI);
+  await client.connect();
+  const database = client.db(process.env.MONGODB_DB || 'tourify');
+  accounts = database.collection('accounts');
+  await accounts.createIndex({ email: 1 }, { unique: true });
+
+  app.listen(port, () => {
+    console.log(`Backend listening on port ${port}`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error('Failed to start backend:', error.message);
+  process.exitCode = 1;
 });

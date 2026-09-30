@@ -1,0 +1,12 @@
+[
+  {
+    "email": "bla",
+    "salt": "74c501aff2c3b7f492a6d06e05a499c8",
+    "passwordHash": "68d10776054e5a2057390c1fb63d22933612eb0b7e72174bd44362743c4e3cd77abe9490ad4fe4d4fa4a46efd6d1eca215f16887b3edc0c678a313c4f9ea3689"
+  },
+  {
+    "email": "alice@example.com",
+    "salt": "fbd0588bce6a7f1dce3c9dadd7dca469",
+    "passwordHash": "82893a60e96ca2bac0883e1a1e9d2a20935b3b33fc44d097b208f4bf73eeecb86b66d5f4b6790afee231de7e8d3b82a4817f09ec691c9984995b5cb9d876d0cb"
+  }
+]
