@@ -1,17 +1,16 @@
 const dotenv = require('dotenv').config();
 const express = require('express');
-const app = express();
-const port = 3000;
-const axios = require("axios");
+const axios = require('axios');
 const crypto = require('node:crypto');
 const { MongoClient } = require('mongodb');
+
+const app = express();
+const port = 3000;
+const API_KEY = process.env.YELP_API_KEY;
 
 app.use(express.json({ limit: '10kb' }));
 
 let accounts;
-const API_KEY = process.env.YELP_API_KEY;
-async function getPlaces(location) {
-  let offset = parseInt(Math.random() * 230);
 
 function derivePasswordHash(password, salt) {
   return new Promise((resolve, reject) => {
@@ -22,134 +21,102 @@ function derivePasswordHash(password, salt) {
   });
 }
 
-const API_KEY = process.env.YELP_API_KEY;
-async function getPlaces(location, term) {
-  try {
-    const response = await axios.get(
-      "https://api.yelp.com/v3/businesses/search",
-      {
-        headers: {
-          Authorization: `Bearer ${API_KEY}`,
-        },
-        params: {
-          location: location,
-          term: term,
-          limit: 10,
-          offset: offset,
-        },
-      }
-    );
+function getOffset(value) {
+  const offset = Number.parseInt(value, 10);
+  return Number.isInteger(offset) && offset >= 0 ? offset : Math.floor(Math.random() * 230);
+}
 
-    return response.data.businesses.map((business) => ({
-      id: business.id,
-      name: business.name,
-      category: business.categories?.[0]?.title ?? "Unknown",
-      img: business.image_url,
-      stars: business.rating,
-      reviewAmt: business.review_count,
-      lat: business.coordinates?.latitude,
-      long: business.coordinates?.longitude,
-      description: business.location?.display_address?.join(", ") ?? "",
-      term: business.categories.map((category) => category.title).join(", "),
-      address: business.location.address1,
-      city: business.location.city,
-      state: business.location.state,
-      zip_code: business.location.zip_code,
-      phone: business.phone,
-      businessId: business.id,
-      url: business.url,
-    }));
-  }
-  catch (error) {
-    throw error;
-  }
+function mapBusiness(business) {
+  return {
+    id: business.id,
+    name: business.name,
+    category: business.categories?.[0]?.title ?? 'Unknown',
+    img: business.image_url,
+    stars: business.rating,
+    reviewAmt: business.review_count,
+    lat: business.coordinates?.latitude,
+    long: business.coordinates?.longitude,
+    description: business.location?.display_address?.join(', ') ?? '',
+    term: business.categories?.map((category) => category.title).join(', ') ?? '',
+    address: business.location?.address1,
+    city: business.location?.city,
+    state: business.location?.state,
+    zip_code: business.location?.zip_code,
+    phone: business.phone,
+    businessId: business.id,
+    url: business.url,
+  };
+}
+
+async function getPlaces(location, term, offset) {
+  const response = await axios.get('https://api.yelp.com/v3/businesses/search', {
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+    },
+    params: {
+      location,
+      term,
+      limit: 10,
+      offset: getOffset(offset),
+    },
+  });
+
+  return response.data.businesses.map(mapBusiness);
 }
 
 async function getBusinessURL(businessId) {
-  try {
-    const response = await axios.get(
-      `https://api.yelp.com/v3/businesses/${encodeURIComponent(businessId)}`,
-async function searchPlaces(location, search) {
-  let offset = parseInt(Math.random() * 230);
+  const response = await axios.get(
+    `https://api.yelp.com/v3/businesses/${encodeURIComponent(businessId)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+      },
+    }
+  );
 
-  console.log(offset)
-
-  try {
-    const response = await axios.get(
-      "https://api.yelp.com/v3/businesses/search",
-      {
-        headers: {
-          Authorization: `Bearer ${API_KEY}`,
-        },
-      }
-    );
-    return response.data.url;
-  } catch (error) {
-        params: {
-          term: search,
-          location: location,
-          limit: 10,
-          offset: offset,
-        },
-      }
-    );
-
-    return response.data.businesses.map((business) => ({
-      id: business.id,
-      name: business.name,
-      category: business.categories?.[0]?.title ?? "Unknown",
-      img: business.image_url,
-      stars: business.rating,
-      reviewAmt: business.review_count,
-      lat: business.coordinates?.latitude,
-      long: business.coordinates?.longitude,
-      description: business.location?.display_address?.join(", ") ?? "",
-    }));
-  }
-  catch (error) {
-    throw error;
-  }
+  return response.data.url;
 }
 
 app.get('/fyp', async (req, res) => {
   if (!req.query.location) {
-    return res.status(400).send("Missing location parameter");
+    return res.status(400).send('Missing location parameter');
   }
+
   try {
-    res.json(await getPlaces(req.query.location));
+    const term = req.query.query || req.query.term;
+    res.json(await getPlaces(req.query.location, term, req.query.offset));
   } catch (error) {
     console.error('Failed to fetch recommended places:', error.message);
     res.status(502).json({ error: 'Failed to fetch recommended places' });
   }
-})
+});
 
 app.get('/search', async (req, res) => {
   if (!req.query.location || !req.query.search) {
-    return res.status(400).send("Missing location or search query parameters");
+    return res.status(400).send('Missing location or search query parameters');
   }
+
   try {
-    res.json(await searchPlaces(req.query.location, req.query.search));
+    res.json(await getPlaces(req.query.location, req.query.search, req.query.offset));
   } catch (error) {
-    console.error('Failed to fetch recommended places:', error.message);
-    res.status(502).json({ error: 'Failed to fetch recommended places' });
+    console.error('Failed to search places:', error.message);
+    res.status(502).json({ error: 'Failed to search places' });
   }
-})
+});
 
 app.get('/fypURL', async (req, res) => {
-    res.send(await getBusinessURL(req.query.businessId));
-    // if (!req.query.businessId) {
-    //   return res.status(400).json({ error: 'businessId is required' });
-    // }
+  if (!req.query.businessId) {
+    return res.status(400).json({ error: 'businessId is required' });
+  }
 
-    // try {
-    //   res.json(await getBusinessURL(req.query.businessId));
-    // } catch (error) {
-    //   console.error('Failed to fetch business URL:', error.response?.data ?? error.message);
-    //   res.status(error.response?.status ?? 500).json({
-    //     error: error.response?.data ?? 'Failed to fetch business URL',
-    //   });
-    // }
-})
+  try {
+    res.send(await getBusinessURL(req.query.businessId));
+  } catch (error) {
+    console.error('Failed to fetch business URL:', error.message);
+    res.status(502).json({ error: 'Failed to fetch business URL' });
+  }
+});
+
 app.get('/', (req, res) => {
   res.send('Gerald says hi!');
 });
