@@ -1,17 +1,46 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, FlatList, Dimensions, Image, ActivityIndicator, Modal, ScrollView, Linking } from 'react-native';
+import { View, Text, StyleSheet, Pressable, FlatList, Dimensions, Image, ActivityIndicator, Modal, ScrollView, Linking, Platform } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import { useSavedPlaces } from '../context/SavedPlacesContext';
 import { useTheme } from '../context/ThemeContext';
 import { ErrorState, LoadingState } from '../components/LoadState';
 import { getRecommendedPlaces } from '../services/placesApi';
 import { userProfile } from '../data/profile';
+import { SERPAPI_KEY } from '../config';
+import * as Location from 'expo-location';
+import MapView, { Marker } from 'react-native-maps';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, runOnUI, useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
 
 const { height, width } = Dimensions.get('window');
 const cardHeight = height * 0.68;
 const menuImageWidth = width - 44;
+const fallbackLocation = 'Los Angeles';
+
+async function getUserLocation() {
+  const permission = await Location.requestForegroundPermissionsAsync();
+  if (permission.status !== 'granted') {
+    console.log("Location not found")
+    return fallbackLocation;
+  }
+
+  const position = await Location.getCurrentPositionAsync({
+    accuracy: Location.Accuracy.Balanced,
+  });
+  const [address] = await Location.reverseGeocodeAsync(position.coords);
+  return [address?.city, address?.region, address?.country].filter(Boolean).join(', ') || fallbackLocation;
+}
+
+function openPlaceInMaps(place, latitude, longitude) {
+  const name = encodeURIComponent(place?.name || 'Place');
+  const mapUrl = Platform.select({
+    ios: `http://maps.apple.com/?ll=${latitude},${longitude}&q=${name}`,
+    android: `geo:${latitude},${longitude}?q=${latitude},${longitude}(${name})`,
+    default: `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`,
+  });
+
+  Linking.openURL(mapUrl).catch(() => {});
+}
 
 function getPlaceHighlights(place) {
   if (Array.isArray(place?.highlights) && place.highlights.length) return place.highlights;
@@ -23,11 +52,15 @@ function getPlaceHighlights(place) {
 }
 
 async function getPlaceDetails(place) {
+  if (!SERPAPI_KEY) {
+    throw new Error('SerpApi is not configured. Set EXPO_PUBLIC_SERPAPI_KEY in Frontend/.env and restart Expo.');
+  }
+
   const searchParams = new URLSearchParams({
     engine: 'yelp',
     find_desc: place.name,
     find_loc: 'Los Angeles',
-    api_key: process.env.EXPO_PUBLIC_SERPAPI_KEY,
+    api_key: SERPAPI_KEY,
   });
   const searchResponse = await fetch(`https://serpapi.com/search.json?${searchParams.toString()}`);
   if (!searchResponse.ok) {
@@ -47,7 +80,7 @@ async function getPlaceDetails(place) {
   const params = new URLSearchParams({
     engine: 'yelp_place',
     place_id: placeSlug,
-    api_key: '14336cfea8cb4690e9e0930b343c1aa86c98205a8c583c1059bddfab9f82d417',
+    api_key: SERPAPI_KEY,
   });
   const response = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
   if (!response.ok) {
@@ -152,6 +185,7 @@ export default function ForYouScreen() {
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [dismissPlaceId, setDismissPlaceId] = useState(null);
+  const [location, setLocation] = useState(fallbackLocation);
   const detailCacheRef = useRef({});
   const detailRequestsRef = useRef({});
   const placeRequestIdRef = useRef(0);
@@ -164,7 +198,9 @@ export default function ForYouScreen() {
     setError('');
 
     try {
-      setData(await getRecommendedPlaces('LosAngeles', 0, userProfile));
+      const currentLocation = await getUserLocation().catch(() => fallbackLocation);
+      setLocation(currentLocation);
+      setData(await getRecommendedPlaces(currentLocation, 0, userProfile));
       setHasMore(true);
       setStatus('success');
     } catch (loadError) {
@@ -178,7 +214,7 @@ export default function ForYouScreen() {
 
     setIsLoadingMore(true);
     try {
-      const nextPlaces = await getRecommendedPlaces('LosAngeles', data.length, userProfile);
+      const nextPlaces = await getRecommendedPlaces(location, data.length, userProfile);
       const existingIds = new Set(data.map((place) => place.id));
       const uniquePlaces = nextPlaces.filter((place) => !existingIds.has(place.id));
 
@@ -296,6 +332,10 @@ export default function ForYouScreen() {
 
   if (status === 'loading') return <LoadingState />;
   if (status === 'error') return <ErrorState message={error} onRetry={loadPlaces} />;
+
+  const placeLatitude = Number(selectedPlace?.latitude);
+  const placeLongitude = Number(selectedPlace?.longitude);
+  const hasPlaceCoordinates = Number.isFinite(placeLatitude) && Number.isFinite(placeLongitude);
 
   const renderItem = ({ item }) => (
     <View style={[styles.placeCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -419,6 +459,12 @@ export default function ForYouScreen() {
                 </Text>
               </View>
             </View>
+            <ScrollView
+              style={styles.menuScroll}
+              contentContainerStyle={styles.menuScrollContent}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+            >
             {isLoadingDetails ? (
               <View style={[styles.menuImage, styles.loadingImage, { backgroundColor: theme.elevatedSurface }]}>
                 <ActivityIndicator size="large" color={theme.text} />
@@ -499,6 +545,23 @@ export default function ForYouScreen() {
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
               Hours: {selectedPlaceDetail?.operation_hours?.hours?.[0]?.hours || 'Hours loading'}
             </Text>
+            {hasPlaceCoordinates ? (
+              <MapView
+                style={styles.menuMap}
+                onPress={() => openPlaceInMaps(selectedPlace, placeLatitude, placeLongitude)}
+                initialRegion={{
+                  latitude: placeLatitude,
+                  longitude: placeLongitude,
+                  latitudeDelta: 0.01,
+                  longitudeDelta: 0.01,
+                }}
+              >
+                <Marker
+                  coordinate={{ latitude: placeLatitude, longitude: placeLongitude }}
+                  title={selectedPlace?.name}
+                />
+              </MapView>
+            ) : null}
             <View style={styles.menuActions}>
               <Pressable style={[styles.menuSecondaryButton, { borderColor: theme.border }]} onPress={closePlaceMenu}>
                 <Text style={[styles.menuSecondaryText, { color: theme.text }]}>Close</Text>
@@ -516,6 +579,7 @@ export default function ForYouScreen() {
                 <Text style={styles.menuPrimaryText}>{isSaved(selectedPlace?.id) ? 'Saved' : 'Save place'}</Text>
               </Pressable>
             </View>
+            </ScrollView>
             </Animated.View>
           </View>
         </GestureDetector>
@@ -694,6 +758,12 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 28,
   },
+  menuScroll: {
+    maxHeight: height * 0.78,
+  },
+  menuScrollContent: {
+    paddingBottom: 4,
+  },
   menuHandle: {
     alignSelf: 'center',
     borderRadius: 99,
@@ -743,6 +813,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     marginTop: 8,
+  },
+  menuMap: {
+    borderRadius: 14,
+    height: 190,
+    marginTop: 14,
+    overflow: 'hidden',
+    width: '100%',
   },
   menuLink: {
     textDecorationLine: 'underline',
