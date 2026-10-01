@@ -8,3 +8,9 @@ export const userProfile = {
   groupSize: '',
   transportation: [],
 };
+
+export const savedPlaces = [
+];
+
+export const plannerItems = [
+];

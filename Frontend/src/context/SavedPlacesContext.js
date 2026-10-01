@@ -25,7 +25,7 @@ export function SavedPlacesProvider({ children }) {
           return currentPlaces;
         }
 
-        return [...currentPlaces, toSavedPlace(place)];
+        return [toSavedPlace(place), ...currentPlaces];
       });
     },
     removeSavedPlace: (placeId) => {

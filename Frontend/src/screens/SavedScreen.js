@@ -82,7 +82,9 @@ export default function SavedScreen() {
         )}
         ListEmptyComponent={(
           <View style={[styles.emptyState, { backgroundColor: theme.surface }]}>
-            <Text style={[styles.emptyText, { color: theme.mutedText }]}>No saved places match your search.</Text>
+            <Text style={[styles.emptyText, { color: theme.mutedText }]}> 
+              {savedPlaces.length === 0 ? 'No places saved yet.' : 'No saved places match your search.'}
+            </Text>
           </View>
         )}
       />
