@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
-import { savedPlaces as initialSavedPlaces } from '../data/profile';
 
 const SavedPlacesContext = createContext(null);
 
@@ -15,7 +14,7 @@ function toSavedPlace(place) {
 }
 
 export function SavedPlacesProvider({ children }) {
-  const [savedPlaces, setSavedPlaces] = useState(initialSavedPlaces);
+  const [savedPlaces, setSavedPlaces] = useState([]);
 
   const value = useMemo(() => ({
     savedPlaces,

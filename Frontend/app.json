@@ -3,9 +3,11 @@
     "name": "tourify-mobile",
     "slug": "tourify-mobile",
     "version": "1.0.0",
+    "scheme": "tourify",
     "platforms": [
       "ios",
-      "android"
+      "android",
+      "web"
     ],
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -25,7 +27,7 @@
     "plugins": [
       "expo-image",
       "expo-splash-screen",
-      "expo-apple-authentication"
+      "expo-web-browser"
     ]
   }
 }

@@ -13,6 +13,10 @@ npm start
 
 Use the Expo CLI prompts to open the app on a development build, Android emulator, or iOS simulator.
 
+Google sign-in requires `EXPO_PUBLIC_GOOGLE_CLIENT_ID` in `Frontend/.env.local`.
+Use the matching Google Web client ID in `Backend/.env` as `GOOGLE_CLIENT_ID`.
+The backend verifies the ID token and stores the Google profile in `Backend/users.json`.
+
 ## Project structure
 
 - `App.js` - application providers, login state, and React Navigation tab navigator

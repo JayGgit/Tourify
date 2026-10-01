@@ -5,7 +5,7 @@ import { useSavedPlaces } from '../context/SavedPlacesContext';
 import { useTheme } from '../context/ThemeContext';
 import { ErrorState, LoadingState } from '../components/LoadState';
 import { getRecommendedPlaces } from '../services/placesApi';
-import { userProfile } from '../data/profile';
+import { useProfile } from '../context/ProfileContext';
 
 const { height } = Dimensions.get('window');
 const cardHeight = height * 0.68;
@@ -18,13 +18,14 @@ export default function ForYouScreen() {
   const [hasMore, setHasMore] = useState(true);
   const { isSaved, savePlace } = useSavedPlaces();
   const { theme } = useTheme();
+  const { profile } = useProfile();
 
   const loadPlaces = async () => {
     setStatus('loading');
     setError('');
 
     try {
-      setData(await getRecommendedPlaces('LosAngeles', 0, userProfile));
+      setData(await getRecommendedPlaces('LosAngeles', 0, profile));
       setHasMore(true);
       setStatus('success');
     } catch (loadError) {
@@ -38,7 +39,7 @@ export default function ForYouScreen() {
 
     setIsLoadingMore(true);
     try {
-      const nextPlaces = await getRecommendedPlaces('LosAngeles', data.length, userProfile);
+      const nextPlaces = await getRecommendedPlaces('LosAngeles', data.length, profile);
       const existingIds = new Set(data.map((place) => place.id));
       const uniquePlaces = nextPlaces.filter((place) => !existingIds.has(place.id));
 
@@ -53,7 +54,7 @@ export default function ForYouScreen() {
 
   useEffect(() => {
     loadPlaces();
-  }, []);
+  }, [profile]);
 
   if (status === 'loading') return <LoadingState />;
   if (status === 'error') return <ErrorState message={error} onRetry={loadPlaces} />;

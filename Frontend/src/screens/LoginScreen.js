@@ -1,131 +1,183 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet, Platform, Alert } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  Dimensions,
+} from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
-import * as AppleAuthentication from 'expo-apple-authentication';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
 import { API_URL } from '../config';
 
+WebBrowser.maybeCompleteAuthSession();
+
+const { height: screenHeight } = Dimensions.get('window');
+const isSmallScreen = screenHeight < 700;
+
+const GOOGLE_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
+
+const discovery = {
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
+};
+
 export default function LoginScreen({ onLogin }) {
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [nonce] = useState(() => (
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  ));
+
+  const googleConfigured = Boolean(GOOGLE_CLIENT_ID);
+
+  const redirectUri = AuthSession.makeRedirectUri({
+    scheme: 'tourify',
+  });
+
+  const [request, response, promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: GOOGLE_CLIENT_ID,
+      redirectUri,
+      scopes: ['openid', 'profile', 'email'],
+      responseType: 'id_token',
+      usePKCE: false,
+      prompt: 'select_account',
+      extraParams: {
+        nonce,
+      },
+    },
+    discovery
+  );
 
   useEffect(() => {
-    checkAppleAuthAvailability();
-  }, []);
+    if (!response) return;
 
-  const checkAppleAuthAvailability = async () => {
-    try {
-      const isAvailable = await AppleAuthentication.isAvailableAsync();
-      setAppleAuthAvailable(isAvailable);
-    } catch (e) {
-        // For testing in Expo Go, assume available
-        // Remove this in production!
-        setAppleAuthAvailable(true);
+    if (response.type === 'success') {
+      const idToken = response.params?.id_token;
+
+      if (!idToken) {
+        setError('Google did not return an ID token.');
+        setIsSubmitting(false);
+        return;
       }
-    };
 
-  const handleAppleSignIn = async () => {
-    if (Platform.OS !== 'ios') {
-      Alert.alert('Apple Sign In', 'Apple Sign In is only available on iOS devices.');
+      handleGoogleSuccess(idToken);
+    }
+
+    if (response.type === 'error') {
+      setError(
+        response.error?.message || 'Google sign in failed.'
+      );
+      setIsSubmitting(false);
+    }
+
+    if (response.type === 'cancel' || response.type === 'dismiss') {
+      setIsSubmitting(false);
+    }
+  }, [response]);
+
+  const handleGoogleSignIn = async () => {
+    if (!googleConfigured) {
+      setError('Google sign in is not configured yet.');
       return;
     }
 
-    if (!appleAuthAvailable) {
-      Alert.alert('Not Available', 'Apple Sign In is not available on this device.');
+    if (!request) {
+      setError('Google sign in is still loading. Try again.');
       return;
     }
 
-    setIsLoading(true);
     setError('');
+    setIsSubmitting(true);
 
     try {
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
+      await promptAsync();
+    } catch (e) {
+      setError('Failed to start Google sign in.');
+      setIsSubmitting(false);
+    }
+  };
 
-      // Send the Apple identity token to your backend for verification
-      const response = await fetch(`${API_URL}/auth/apple`, {
+  const handleGoogleSuccess = async (idToken) => {
+    try {
+      const response = await fetch(`${API_URL}/auth/google`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-          identityToken: credential.identityToken,
-          authorizationCode: credential.authorizationCode,
-          fullName: credential.fullName,
-          email: credential.email,
-          user: credential.user,
+          idToken,
         }),
       });
 
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || 'Apple authentication failed.');
+        throw new Error(
+          result.error || 'Google authentication failed.'
+        );
       }
 
-      onLogin(result.email || credential.email || `apple_${credential.user}`);
+      onLogin(result.email);
     } catch (requestError) {
-      if (requestError.code === 'ERR_CANCELED') {
-        // User cancelled the sign in flow
-        return;
-      }
-      setError(requestError.message || 'Unable to sign in with Apple. Please try again.');
+      setError(
+        requestError.message === 'Failed to fetch'
+          ? `Cannot reach the auth server at ${API_URL}. Start the backend and try again.`
+          : requestError.message || 'Unable to sign in with Google. Please try again.'
+      );
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <ScreenContainer style={styles.screen} contentStyle={styles.content} keyboardAware>
+    <ScreenContainer
+      style={styles.screen}
+      contentStyle={styles.content}
+      keyboardAware
+    >
       <View style={styles.brandMark}>
         <Text style={styles.brandMarkText}>T</Text>
       </View>
+
       <Text style={styles.eyebrow}>Welcome to Tourify</Text>
+
       <Text style={styles.title}>Plan trips that feel like you.</Text>
+
       <Text style={styles.subtitle}>
-        Sign in to save places and build your personalized itinerary.
+        Sign in with Google to save places and build your personalized itinerary.
       </Text>
 
       <View style={styles.form}>
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        {appleAuthAvailable ? (
-          <Pressable style={styles.appleButton} onPress={handleAppleSignIn} disabled={isLoading}>
-            <View style={styles.appleButtonContent}>
-              <Text style={styles.appleIcon}></Text>
-              <Text style={styles.appleButtonText}>
-                {isLoading ? 'Signing in...' : 'Continue with Apple'}
-              </Text>
-            </View>
-          </Pressable>
-        ) : (
-          <View style={styles.unavailableContainer}>
-            <Text style={styles.unavailableText}>
-              {Platform.OS != 'ios'
-                ? 'Apple Sign In is not available on this device.'
-                : 'Apple Sign In is only available on iOS devices.'}
+        <Pressable
+          style={[styles.googleButton, isSubmitting && styles.disabledButton]}
+          onPress={handleGoogleSignIn}
+          disabled={isSubmitting}
+        >
+          <View style={styles.googleButtonContent}>
+            <Text style={styles.googleIcon}>G</Text>
+            <Text style={styles.googleButtonText}>
+              {isSubmitting
+                ? 'Signing in...'
+                : 'Continue with Google'}
             </Text>
-            <Text style={styles.unavailableHint}>
-              Please use an iOS device to sign in with Apple.
-            </Text>
-                    {__DEV__ && Platform.OS === 'ios' && (
-                      <Pressable style={[styles.appleButton, styles.testButton]} onPress={handleAppleSignIn} disabled={isLoading}>
-                        <View style={styles.appleButtonContent}>
-                          <Text style={styles.appleIcon}></Text>
-                          <Text style={styles.appleButtonText}>
-                            {isLoading ? 'Signing in...' : 'Test Apple Sign In (Dev)'}
-                          </Text>
-                        </View>
-                      </Pressable>
-                    )}
-                  </View>
-                )}
+          </View>
+        </Pressable>
+
+        {!googleConfigured && (
+          <Text style={styles.unavailableText}>
+            Add EXPO_PUBLIC_GOOGLE_CLIENT_ID to Frontend/.env.local, then restart Expo.
+          </Text>
+        )}
+
       </View>
 
       <Text style={styles.helper}>
-        Your data is securely stored and never shared.
+        Your Google account email is stored securely on the Tourify server.
       </Text>
     </ScreenContainer>
   );
@@ -135,11 +187,14 @@ const styles = StyleSheet.create({
   screen: {
     backgroundColor: '#F4F7FB',
   },
+
   content: {
+    flex: 1,
     justifyContent: 'center',
     paddingTop: 0,
     paddingBottom: 24,
   },
+
   brandMark: {
     width: 56,
     height: 56,
@@ -147,91 +202,102 @@ const styles = StyleSheet.create({
     backgroundColor: '#4C6FFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
+    marginBottom: isSmallScreen ? 16 : 24,
   },
+
   brandMarkText: {
     color: '#FFFFFF',
     fontSize: 30,
     fontWeight: '800',
   },
+
   eyebrow: {
     fontSize: 13,
     color: '#4C6FFF',
     textTransform: 'uppercase',
     letterSpacing: 1.2,
     fontWeight: '700',
-    marginBottom: 10,
+    marginBottom: isSmallScreen ? 6 : 10,
   },
+
   title: {
-    fontSize: 36,
-    lineHeight: 42,
+    fontSize: isSmallScreen ? 28 : 36,
+    lineHeight: isSmallScreen ? 34 : 42,
     fontWeight: '800',
     color: '#152033',
-    marginBottom: 12,
+    marginBottom: isSmallScreen ? 8 : 12,
   },
+
   subtitle: {
-    fontSize: 16,
-    lineHeight: 24,
+    fontSize: isSmallScreen ? 14 : 16,
+    lineHeight: isSmallScreen ? 20 : 24,
     color: '#64748B',
-    marginBottom: 32,
+    marginBottom: isSmallScreen ? 20 : 32,
   },
+
   form: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
-    padding: 18,
+    padding: isSmallScreen ? 16 : 18,
     shadowColor: '#000',
     shadowOpacity: 0.06,
     shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    width: '100%',
+    maxWidth: 400,
+    alignSelf: 'center',
   },
-  appleButton: {
-    backgroundColor: '#000000',
+
+  googleButton: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
     borderRadius: 12,
     minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'row',
+    marginBottom: 8,
   },
-    testButton: {
-      backgroundColor: '#4C6FFF',
-      marginTop: 12,
-    },
-  appleButtonContent: {
+
+  googleButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  appleIcon: {
+
+  googleIcon: {
     fontSize: 20,
-    color: '#FFFFFF',
-    fontWeight: '600',
+    color: '#4285F4',
+    fontWeight: '700',
   },
-  appleButtonText: {
-    color: '#FFFFFF',
+
+  googleButtonText: {
+    color: '#152033',
     fontSize: 16,
     fontWeight: '700',
   },
-  unavailableContainer: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
+
   unavailableText: {
-    color: '#DC2626',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  unavailableHint: {
     color: '#94A3B8',
-    fontSize: 13,
+    fontSize: 12,
     textAlign: 'center',
+    marginTop: 8,
   },
+
   error: {
     color: '#B91C1C',
     fontSize: 13,
     marginBottom: 10,
     textAlign: 'center',
   },
+
+  disabledButton: {
+    opacity: 0.55,
+  },
+
   helper: {
     color: '#94A3B8',
     fontSize: 13,

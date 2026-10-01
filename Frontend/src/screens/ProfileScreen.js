@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, Pressable } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
-import { userProfile } from '../data/profile';
 import DropdownField from '../components/DropdownField';
 import { useTheme } from '../context/ThemeContext';
+import { useProfile } from '../context/ProfileContext';
 
 const parseList = (value) => String(value)
   .split(',')
@@ -12,13 +12,14 @@ const parseList = (value) => String(value)
 
 export default function ProfileScreen({ route }) {
   const { theme, isDark, toggleTheme } = useTheme();
-  const [profile, setProfile] = useState({
-    ...userProfile,
-    email: route.params?.email || '',
-  });
+  const { profile, updateProfile } = useProfile();
   const [editingAccount, setEditingAccount] = useState(false);
   const [editingTrip, setEditingTrip] = useState(false);
   const [draft, setDraft] = useState(profile);
+
+  React.useEffect(() => {
+    setDraft(profile);
+  }, [profile]);
 
   const beginEditing = () => setDraft(profile);
 
@@ -27,24 +28,22 @@ export default function ProfileScreen({ route }) {
   };
 
   const saveAccount = () => {
-    setProfile((current) => ({
-      ...current,
+    updateProfile({
       name: draft.name.trim(),
-      age: Number(draft.age) || current.age,
+      age: Number(draft.age) || '',
       languages: parseList(draft.languages),
       accessibility: parseList(draft.accessibility),
-    }));
+    });
     setEditingAccount(false);
   };
 
   const saveTrip = () => {
-    setProfile((current) => ({
-      ...current,
+    updateProfile({
       interests: parseList(draft.interests),
       travelStyle: draft.travelStyle.trim(),
-      groupSize: Number(draft.groupSize) || current.groupSize,
+      groupSize: Number(draft.groupSize) || '',
       transportation: parseList(draft.transportation),
-    }));
+    });
     setEditingTrip(false);
   };
 
@@ -73,9 +72,11 @@ export default function ProfileScreen({ route }) {
 
       <View style={[styles.heroCard, { backgroundColor: theme.elevatedSurface, borderColor: theme.border }]}>
         <Text style={[styles.heroLabel, { color: theme.mutedText }]}>Welcome back</Text>
-        <Text style={[styles.heroName, { color: theme.text }]}>{profile.name}</Text>
+        <Text style={[styles.heroName, { color: theme.text }]}>{profile.name || 'Traveler'}</Text>
         <Text style={[styles.heroText, { color: theme.mutedText }]}>
-          Planning a comfortable, personalized trip for {profile.groupSize} travelers with a {profile.travelStyle.toLowerCase()} pace{profile.accessibility.length > 0 ? ' and accessibility needs in mind' : ''}.
+          {profile.groupSize && profile.travelStyle
+            ? `Planning a comfortable, personalized trip for ${profile.groupSize} travelers with a ${profile.travelStyle.toLowerCase()} pace${profile.accessibility.length > 0 ? ' and accessibility needs in mind' : ''}.`
+            : 'Complete your profile to personalize your trip planning experience.'}
         </Text>
       </View>
 
@@ -152,10 +153,10 @@ export default function ProfileScreen({ route }) {
           </>
         ) : (
           <>
-            <Text style={[styles.info, { color: theme.mutedText }]}><Text style={[styles.label, { color: theme.mutedText }]}>Email:</Text> {profile.email}</Text>
-            <Text style={[styles.info, { color: theme.mutedText }]}><Text style={[styles.label, { color: theme.mutedText }]}>Name & Age:</Text> {profile.name}, {profile.age}</Text>
-            <Text style={[styles.info, { color: theme.mutedText }]}><Text style={[styles.label, { color: theme.mutedText }]}>Spoken Languages:</Text> {profile.languages.join(', ')}</Text>
-            <Text style={[styles.info, { color: theme.mutedText }]}><Text style={[styles.label, { color: theme.mutedText }]}>Accessibility Needs:</Text> {profile.accessibility.join(', ')}</Text>
+            <Text style={[styles.info, { color: theme.mutedText }]}><Text style={[styles.label, { color: theme.mutedText }]}>Email:</Text> {profile.email || 'Not available'}</Text>
+            <Text style={[styles.info, { color: theme.mutedText }]}><Text style={[styles.label, { color: theme.mutedText }]}>Name & Age:</Text> {profile.name || 'Not set'}{profile.age ? `, ${profile.age}` : ''}</Text>
+            <Text style={[styles.info, { color: theme.mutedText }]}><Text style={[styles.label, { color: theme.mutedText }]}>Spoken Languages:</Text> {profile.languages.join(', ') || 'Not set'}</Text>
+            <Text style={[styles.info, { color: theme.mutedText }]}><Text style={[styles.label, { color: theme.mutedText }]}>Accessibility Needs:</Text> {profile.accessibility.join(', ') || 'None selected'}</Text>
           </>
         )}
       </View>

@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { plannerItems as initialPlannerItems } from '../data/profile';
 
 const PlannerContext = createContext(null);
 const SAVED_PLAN_KEY = 'tourify.savedPlan';
@@ -18,7 +17,7 @@ function toPlannerItem(place, index) {
 }
 
 export function PlannerProvider({ children }) {
-  const [items, setItems] = useState(() => [...initialPlannerItems]);
+  const [items, setItems] = useState([]);
   const [hiddenItems, setHiddenItems] = useState([]);
   const [savedPlans, setSavedPlans] = useState([]);
   const [lastSavedAt, setLastSavedAt] = useState(null);

@@ -13,6 +13,7 @@ import PlannerScreen from './src/screens/PlannerScreen';
 import { SavedPlacesProvider } from './src/context/SavedPlacesContext';
 import { PlannerProvider } from './src/context/PlannerContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
+import { ProfileProvider } from './src/context/ProfileContext';
 import LoginScreen from './src/screens/LoginScreen';
 
 const Tab = createBottomTabNavigator();
@@ -36,7 +37,9 @@ export default function App() {
           <SavedPlacesProvider>
             <PlannerProvider>
               {isLoggedIn ? (
-                <AppNavigator email={loggedInEmail} />
+                <ProfileProvider email={loggedInEmail}>
+                  <AppNavigator email={loggedInEmail} />
+                </ProfileProvider>
               ) : (
                 <LoginScreen onLogin={(email) => {
                   setLoggedInEmail(email);
