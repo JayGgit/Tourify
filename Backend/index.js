@@ -156,11 +156,15 @@ function mapBusiness(business) {
   };
 }
 
+function yelpHeaders() {
+  return {
+    Authorization: `Bearer ${API_KEY}`,
+  };
+}
+
 async function getPlaces(location, term, offset) {
   const response = await axios.get('https://api.yelp.com/v3/businesses/search', {
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-    },
+    headers: yelpHeaders(),
     params: {
       location,
       term,
@@ -176,9 +180,7 @@ async function getBusinessURL(businessId) {
   const response = await axios.get(
     `https://api.yelp.com/v3/businesses/${encodeURIComponent(businessId)}`,
     {
-      headers: {
-        Authorization: `Bearer ${API_KEY}`,
-      },
+      headers: yelpHeaders(),
     }
   );
 
@@ -250,6 +252,30 @@ app.post('/auth/google', async (req, res) => {
   }
 });
 
+async function getBusinessDetails(businessId) {
+  const response = await axios.get(
+    `https://api.yelp.com/v3/businesses/${encodeURIComponent(businessId)}`,
+    {
+      headers: yelpHeaders(),
+      params: { locale: 'en_US' },
+    }
+  );
+  const business = response.data;
+  const attributes = business.attributes || {};
+
+  return {
+    ...business,
+    images: business.photos || [],
+    address: business.location?.display_address?.join(', ') || '',
+    phone: business.display_phone || business.phone || '',
+    reviews: business.review_count ? `${business.review_count.toLocaleString()} reviews` : 'No reviews yet',
+    reviewsUrl: business.url || '',
+    website: attributes.BusinessUrl || attributes.BusinessDisplayUrl || '',
+    full_menu: business.yelp_menu_url || attributes.MenuUrl || '',
+    highlights: [],
+  };
+}
+
 app.get('/fyp', async (req, res) => {
   if (!req.query.location) {
     return res.status(400).send('Missing location parameter');
@@ -287,6 +313,74 @@ app.get('/fypURL', async (req, res) => {
   } catch (error) {
     console.error('Failed to fetch business URL:', error.message);
     res.status(502).json({ error: 'Failed to fetch business URL' });
+  }
+});
+
+app.get('/account/register', async (req, res) => {
+  const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : '';
+  const password = req.query.password;
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'Provide a valid email and a password with at least 8 characters.' });
+  }
+
+  try {
+    const salt = crypto.randomBytes(16);
+    const passwordHash = await derivePasswordHash(password, salt);
+    const result = await accounts.insertOne({
+      email,
+      passwordSalt: salt.toString('hex'),
+      passwordHash: passwordHash.toString('hex'),
+      createdAt: new Date(),
+    });
+
+    res.status(201).json({ id: result.insertedId.toString(), email });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: 'An account with that email already exists.' });
+    }
+    console.error('Account registration failed:', error.message);
+    res.status(500).json({ error: 'Unable to create account.' });
+  }
+});
+
+app.get('/account/login', async (req, res) => {
+  const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : '';
+  const password = req.query.password;
+
+  if (!email || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Email and password are required.' });
+  }
+
+  try {
+    const account = await accounts.findOne({ email });
+    if (!account) return res.status(401).json({ error: 'Invalid email or password.' });
+
+    const salt = Buffer.from(account.passwordSalt, 'hex');
+    const storedHash = Buffer.from(account.passwordHash, 'hex');
+    const suppliedHash = await derivePasswordHash(password, salt);
+    if (!crypto.timingSafeEqual(storedHash, suppliedHash)) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    res.json({ id: account._id.toString(), email: account.email });
+  } catch (error) {
+    console.error('Account login failed:', error.message);
+    res.status(500).json({ error: 'Unable to log in.' });
+  }
+});
+
+app.get('/businesses/:businessId', async (req, res) => {
+  if (!req.params.businessId) {
+    return res.status(400).json({ error: 'businessId is required' });
+  }
+
+  try {
+    res.json(await getBusinessDetails(req.params.businessId));
+  } catch (error) {
+    const status = error.response?.status;
+    console.error('Failed to fetch business details:', error.message);
+    res.status(status === 404 ? 404 : 502).json({ error: 'Failed to fetch business details' });
   }
 });
 
