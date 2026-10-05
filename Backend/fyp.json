@@ -1,0 +1,11 @@
+{
+    "id": "aAA0AAaAaAAAAaaAAaa0aA",
+    "name": "Place Name",
+    "category": "Resturant",
+    "img": "https://s3-media0.fl.yelpcdn.com/bphoto/0K773bBzJ8v-kaIezxjb9Q/o.jpg",
+    "stars": 5,
+    "reviewAmt": 100,
+    "lat": 34.22729,
+    "long": -118.243119,
+    "description": "This is a prety lengthy example description with about 80 characters and stuff"
+}

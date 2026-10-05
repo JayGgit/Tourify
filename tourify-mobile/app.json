@@ -3,12 +3,6 @@
     "name": "tourify-mobile",
     "slug": "tourify-mobile",
     "version": "1.0.0",
-    "scheme": "tourify",
-    "platforms": [
-      "ios",
-      "android",
-      "web"
-    ],
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -21,20 +15,10 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "package": "com.crow7408.tourifymobile"
+      }
     },
-    "plugins": [
-      "expo-image",
-      "expo-splash-screen",
-      "expo-apple-authentication",
-      [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location."
-        }
-      ],
-      "expo-web-browser"
-    ]
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
   }
 }
