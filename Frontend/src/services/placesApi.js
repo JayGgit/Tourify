@@ -57,3 +57,12 @@ export async function getRecommendedPlaces(location = 'LosAngeles', offset = 0, 
 
   return result.map(normalizePlace);
 }
+
+export async function getPlaceDetails(placeId) {
+  const response = await fetch(`${FYP_API_URL.replace(/\/fyp$/, '')}/businesses/${encodeURIComponent(placeId)}`);
+  if (!response.ok) {
+    throw new Error(`Place details could not be loaded (${response.status}).`);
+  }
+
+  return response.json();
+}
