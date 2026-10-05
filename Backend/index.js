@@ -117,6 +117,60 @@ app.get('/fypURL', async (req, res) => {
   }
 });
 
+app.get('/account/register', async (req, res) => {
+  const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : '';
+  const password = req.query.password;
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'Provide a valid email and a password with at least 8 characters.' });
+  }
+
+  try {
+    const salt = crypto.randomBytes(16);
+    const passwordHash = await derivePasswordHash(password, salt);
+    const result = await accounts.insertOne({
+      email,
+      passwordSalt: salt.toString('hex'),
+      passwordHash: passwordHash.toString('hex'),
+      createdAt: new Date(),
+    });
+
+    res.status(201).json({ id: result.insertedId.toString(), email });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: 'An account with that email already exists.' });
+    }
+    console.error('Account registration failed:', error.message);
+    res.status(500).json({ error: 'Unable to create account.' });
+  }
+});
+
+app.get('/account/login', async (req, res) => {
+  const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : '';
+  const password = req.query.password;
+
+  if (!email || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Email and password are required.' });
+  }
+
+  try {
+    const account = await accounts.findOne({ email });
+    if (!account) return res.status(401).json({ error: 'Invalid email or password.' });
+
+    const salt = Buffer.from(account.passwordSalt, 'hex');
+    const storedHash = Buffer.from(account.passwordHash, 'hex');
+    const suppliedHash = await derivePasswordHash(password, salt);
+    if (!crypto.timingSafeEqual(storedHash, suppliedHash)) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    res.json({ id: account._id.toString(), email: account.email });
+  } catch (error) {
+    console.error('Account login failed:', error.message);
+    res.status(500).json({ error: 'Unable to log in.' });
+  }
+});
+
 app.get('/', (req, res) => {
   res.send('Gerald says hi!');
 });
