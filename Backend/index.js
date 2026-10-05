@@ -9,6 +9,13 @@ const port = 3000;
 const API_KEY = process.env.YELP_API_KEY;
 
 app.use(express.json({ limit: '10kb' }));
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 
 let accounts;
 
@@ -54,6 +61,14 @@ function yelpHeaders() {
   };
 }
 
+function formatHours(hours) {
+  return (hours || []).map((entry) => {
+    const start = entry.start?.padStart(4, '0');
+    const end = entry.end?.padStart(4, '0');
+    return `${entry.day}: ${start || '?'}-${end || '?'}`;
+  }).join(', ');
+}
+
 async function getPlaces(location, term, offset) {
   const response = await axios.get('https://api.yelp.com/v3/businesses/search', {
     headers: yelpHeaders(),
@@ -97,9 +112,12 @@ async function getBusinessDetails(businessId) {
     phone: business.display_phone || business.phone || '',
     reviews: business.review_count ? `${business.review_count.toLocaleString()} reviews` : 'No reviews yet',
     reviewsUrl: business.url || '',
-    website: attributes.BusinessUrl || attributes.BusinessDisplayUrl || '',
-    full_menu: business.yelp_menu_url || attributes.MenuUrl || '',
+    website: attributes.business_url || attributes.BusinessUrl || attributes.BusinessDisplayUrl || '',
+    full_menu: business.yelp_menu_url || attributes.menu_url || attributes.MenuUrl || '',
     highlights: [],
+    operation_hours: {
+      hours: [{ hours: formatHours(business.hours?.[0]?.open) }],
+    },
   };
 }
 

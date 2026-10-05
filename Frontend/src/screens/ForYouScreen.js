@@ -138,6 +138,7 @@ export default function ForYouScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [selectedPlace, setSelectedPlace] = useState(null);
   const [selectedPlaceDetail, setSelectedPlaceDetail] = useState(null);
+  const [detailError, setDetailError] = useState('');
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [dismissPlaceId, setDismissPlaceId] = useState(null);
@@ -225,6 +226,7 @@ export default function ForYouScreen() {
     placeRequestIdRef.current = requestId;
     setSelectedPlace(place);
     setSelectedPlaceDetail(cachedDetails || null);
+    setDetailError('');
     setIsLoadingDetails(!cachedDetails);
 
     loadPlaceDetail(place)
@@ -235,6 +237,7 @@ export default function ForYouScreen() {
         if (placeRequestIdRef.current === requestId) {
           console.error(loadError);
           setSelectedPlaceDetail(null);
+          setDetailError(loadError.message);
         }
       })
       .finally(() => {
@@ -388,6 +391,9 @@ export default function ForYouScreen() {
                 <Text style={[styles.menuTitle, { color: theme.text }]}>
                   {selectedPlace?.name || 'Place name'}
                 </Text>
+                {detailError ? (
+                  <Text style={[styles.menuDetail, { color: theme.mutedText }]}>{detailError}</Text>
+                ) : null}
               </View>
             </View>
             <GestureDetector gesture={menuScrollGesture}>
@@ -474,16 +480,16 @@ export default function ForYouScreen() {
               </Pressable>
             ) : null}
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {selectedPlaceDetail?.website || 'Website loading'}
+              {selectedPlaceDetail?.website || 'No website listed'}
             </Text>
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {getPlaceHighlights(selectedPlaceDetail).join(', ') || 'Highlights loading'}
+              {getPlaceHighlights(selectedPlaceDetail).join(', ') || 'No highlights available'}
             </Text>
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {selectedPlaceDetail?.categories?.map((category) => category.title).join(', ') || 'Categories loading'}
+              {selectedPlaceDetail?.categories?.map((category) => category.title).join(', ') || 'No categories listed'}
             </Text>
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              Hours: {selectedPlaceDetail?.operation_hours?.hours?.[0]?.hours || 'Hours loading'}
+              Hours: {selectedPlaceDetail?.operation_hours?.hours?.[0]?.hours || 'Hours unavailable'}
             </Text>
             {hasPlaceCoordinates && Platform.OS !== 'web' ? (
               <MapView
