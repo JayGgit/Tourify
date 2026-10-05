@@ -48,11 +48,15 @@ function mapBusiness(business) {
   };
 }
 
+function yelpHeaders() {
+  return {
+    Authorization: `Bearer ${API_KEY}`,
+  };
+}
+
 async function getPlaces(location, term, offset) {
   const response = await axios.get('https://api.yelp.com/v3/businesses/search', {
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-    },
+    headers: yelpHeaders(),
     params: {
       location,
       term,
@@ -68,13 +72,35 @@ async function getBusinessURL(businessId) {
   const response = await axios.get(
     `https://api.yelp.com/v3/businesses/${encodeURIComponent(businessId)}`,
     {
-      headers: {
-        Authorization: `Bearer ${API_KEY}`,
-      },
+      headers: yelpHeaders(),
     }
   );
 
   return response.data.url;
+}
+
+async function getBusinessDetails(businessId) {
+  const response = await axios.get(
+    `https://api.yelp.com/v3/businesses/${encodeURIComponent(businessId)}`,
+    {
+      headers: yelpHeaders(),
+      params: { locale: 'en_US' },
+    }
+  );
+  const business = response.data;
+  const attributes = business.attributes || {};
+
+  return {
+    ...business,
+    images: business.photos || [],
+    address: business.location?.display_address?.join(', ') || '',
+    phone: business.display_phone || business.phone || '',
+    reviews: business.review_count ? `${business.review_count.toLocaleString()} reviews` : 'No reviews yet',
+    reviewsUrl: business.url || '',
+    website: attributes.BusinessUrl || attributes.BusinessDisplayUrl || '',
+    full_menu: business.yelp_menu_url || attributes.MenuUrl || '',
+    highlights: [],
+  };
 }
 
 app.get('/fyp', async (req, res) => {
@@ -114,6 +140,20 @@ app.get('/fypURL', async (req, res) => {
   } catch (error) {
     console.error('Failed to fetch business URL:', error.message);
     res.status(502).json({ error: 'Failed to fetch business URL' });
+  }
+});
+
+app.get('/businesses/:businessId', async (req, res) => {
+  if (!req.params.businessId) {
+    return res.status(400).json({ error: 'businessId is required' });
+  }
+
+  try {
+    res.json(await getBusinessDetails(req.params.businessId));
+  } catch (error) {
+    const status = error.response?.status;
+    console.error('Failed to fetch business details:', error.message);
+    res.status(status === 404 ? 404 : 502).json({ error: 'Failed to fetch business details' });
   }
 });
 
