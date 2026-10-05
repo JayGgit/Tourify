@@ -8,9 +8,11 @@ import { getRecommendedPlaces } from '../services/placesApi';
 import { useProfile } from '../context/ProfileContext';
 import { SERPAPI_KEY } from '../config';
 import * as Location from 'expo-location';
-import MapView, { Marker } from 'react-native-maps';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, runOnUI, useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
+
+const MapView = Platform.OS === 'web' ? null : require('react-native-maps').default;
+const Marker = Platform.OS === 'web' ? null : require('react-native-maps').Marker;
 
 const { height, width } = Dimensions.get('window');
 const cardHeight = height * 0.68;
@@ -307,14 +309,19 @@ export default function ForYouScreen() {
     }
   }, [selectedPlace]);
 
+  const menuScrollGesture = Gesture.Native();
+  const menuScrollOffset = useSharedValue(0);
   const menuGesture = Gesture.Pan()
     .activeOffsetY([10, 999])
     .failOffsetX([-30, 30])
+    .simultaneousWithExternalGesture(menuScrollGesture)
     .onUpdate((event) => {
-      menuTranslateY.value = Math.max(0, event.translationY);
+      if (menuScrollOffset.value <= 0 && event.translationY > 0) {
+        menuTranslateY.value = event.translationY;
+      }
     })
     .onEnd((event) => {
-      if (event.translationY > 120) {
+      if (menuScrollOffset.value <= 0 && event.translationY > 120) {
         menuTranslateY.value = withTiming(height, { duration: 180 }, (finished) => {
           if (finished) runOnJS(closePlaceMenu)();
         });
@@ -429,12 +436,21 @@ export default function ForYouScreen() {
                 </Text>
               </View>
             </View>
-            <ScrollView
-              style={styles.menuScroll}
-              contentContainerStyle={styles.menuScrollContent}
-              showsVerticalScrollIndicator={false}
-              nestedScrollEnabled
-            >
+            <GestureDetector gesture={menuScrollGesture}>
+              <ScrollView
+                style={styles.menuScroll}
+                contentContainerStyle={styles.menuScrollContent}
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled
+                scrollEventThrottle={16}
+                onScroll={(event) => {
+                  const scrollOffset = event.nativeEvent.contentOffset.y;
+                  menuScrollOffset.value = scrollOffset;
+                  if (scrollOffset < -80) {
+                    closePlaceMenu()
+                  };
+                }}
+              >
             {isLoadingDetails ? (
               <View style={[styles.menuImage, styles.loadingImage, { backgroundColor: theme.elevatedSurface }]}>
                 <ActivityIndicator size="large" color={theme.text} />
@@ -515,7 +531,7 @@ export default function ForYouScreen() {
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
               Hours: {selectedPlaceDetail?.operation_hours?.hours?.[0]?.hours || 'Hours loading'}
             </Text>
-            {hasPlaceCoordinates ? (
+            {hasPlaceCoordinates && Platform.OS !== 'web' ? (
               <MapView
                 style={styles.menuMap}
                 onPress={() => openPlaceInMaps(selectedPlace, placeLatitude, placeLongitude)}
@@ -531,6 +547,13 @@ export default function ForYouScreen() {
                   title={selectedPlace?.name}
                 />
               </MapView>
+            ) : hasPlaceCoordinates ? (
+              <Pressable
+                style={[styles.menuMap, styles.webMapFallback]}
+                onPress={() => openPlaceInMaps(selectedPlace, placeLatitude, placeLongitude)}
+              >
+                <Text style={styles.webMapFallbackText}>Open location in Google Maps</Text>
+              </Pressable>
             ) : null}
             <View style={styles.menuActions}>
               <Pressable style={[styles.menuSecondaryButton, { borderColor: theme.border }]} onPress={closePlaceMenu}>
@@ -549,7 +572,8 @@ export default function ForYouScreen() {
                 <Text style={styles.menuPrimaryText}>{isSaved(selectedPlace?.id) ? 'Saved' : 'Save place'}</Text>
               </Pressable>
             </View>
-            </ScrollView>
+              </ScrollView>
+            </GestureDetector>
             </Animated.View>
           </View>
         </GestureDetector>
@@ -790,6 +814,16 @@ const styles = StyleSheet.create({
     marginTop: 14,
     overflow: 'hidden',
     width: '100%',
+  },
+  webMapFallback: {
+    alignItems: 'center',
+    backgroundColor: '#E8EEF7',
+    justifyContent: 'center',
+  },
+  webMapFallbackText: {
+    color: '#2454A6',
+    fontSize: 14,
+    fontWeight: '700',
   },
   menuLink: {
     textDecorationLine: 'underline',
