@@ -4,13 +4,14 @@ import ScreenContainer from '../components/ScreenContainer';
 import { useSavedPlaces } from '../context/SavedPlacesContext';
 import { useTheme } from '../context/ThemeContext';
 import { ErrorState, LoadingState } from '../components/LoadState';
-import { getRecommendedPlaces, searchPlaces } from '../services/placesApi';
+import { getRecommendedPlaces, getPlaceDetails, searchPlaces } from '../services/placesApi';
 import { useProfile } from '../context/ProfileContext';
-import { SERPAPI_KEY } from '../config';
 import * as Location from 'expo-location';
-import MapView, { Marker } from 'react-native-maps';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, runOnUI, useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
+
+const MapView = Platform.OS === 'web' ? null : require('react-native-maps').default;
+const Marker = Platform.OS === 'web' ? null : require('react-native-maps').Marker;
 
 const { height, width } = Dimensions.get('window');
 const cardHeight = height * 0.68;
@@ -49,51 +50,6 @@ function getPlaceHighlights(place) {
     .filter((feature) => feature.is_active)
     .slice(0, 5)
     .map((feature) => feature.title);
-}
-
-async function getPlaceDetails(place) {
-  if (!SERPAPI_KEY) {
-    throw new Error('SerpApi is not configured. Set EXPO_PUBLIC_SERPAPI_KEY in Frontend/.env and restart Expo.');
-  }
-
-  const searchParams = new URLSearchParams({
-    engine: 'yelp',
-    find_desc: place.name,
-    find_loc: 'Los Angeles',
-    api_key: SERPAPI_KEY,
-  });
-  const searchResponse = await fetch(`https://serpapi.com/search.json?${searchParams.toString()}`);
-  if (!searchResponse.ok) {
-    throw new Error(`Place search could not be loaded (${searchResponse.status}).`);
-  }
-
-  const searchJson = await searchResponse.json();
-  const matchingResult = searchJson.organic_results?.find((result) => result.place_ids?.includes(place.id))
-    || searchJson.organic_results?.[0];
-  const placeSlug = matchingResult?.place_ids?.find((placeId) => placeId !== place.id)
-    || matchingResult?.link?.match(/\/biz\/([^?]+)/)?.[1];
-
-  if (!placeSlug) {
-    throw new Error('A Yelp place slug could not be found.');
-  }
-
-  const params = new URLSearchParams({
-    engine: 'yelp_place',
-    place_id: placeSlug,
-    api_key: SERPAPI_KEY,
-  });
-  const response = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`Place details could not be loaded (${response.status}).`);
-  }
-
-  const json = await response.json();
-  const yelpBusinessUrl = matchingResult?.link?.split('?')[0]
-    || `https://www.yelp.com/biz/${placeSlug}`;
-  return {
-    ...json.place_results,
-    reviewsUrl: `${yelpBusinessUrl}#reviews`,
-  };
 }
 
 function DraggableCard({ item, baseColor, onSwipeLeft, onSwipeRight, onSave, onPress, dismissPlaceId, children }) {
@@ -186,6 +142,7 @@ export default function ForYouScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [selectedPlace, setSelectedPlace] = useState(null);
   const [selectedPlaceDetail, setSelectedPlaceDetail] = useState(null);
+  const [detailError, setDetailError] = useState('');
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [dismissPlaceId, setDismissPlaceId] = useState(null);
@@ -303,7 +260,7 @@ export default function ForYouScreen() {
       return detailRequestsRef.current[place.id];
     }
 
-    const request = getPlaceDetails(place)
+    const request = getPlaceDetails(place.id)
       .then((details) => {
         detailCacheRef.current[place.id] = details;
         return details;
@@ -322,6 +279,7 @@ export default function ForYouScreen() {
     placeRequestIdRef.current = requestId;
     setSelectedPlace(place);
     setSelectedPlaceDetail(cachedDetails || null);
+    setDetailError('');
     setIsLoadingDetails(!cachedDetails);
 
     loadPlaceDetail(place)
@@ -332,6 +290,7 @@ export default function ForYouScreen() {
         if (placeRequestIdRef.current === requestId) {
           console.error(loadError);
           setSelectedPlaceDetail(null);
+          setDetailError(loadError.message);
         }
       })
       .finally(() => {
@@ -360,14 +319,19 @@ export default function ForYouScreen() {
     }
   }, [selectedPlace]);
 
+  const menuScrollGesture = Gesture.Native();
+  const menuScrollOffset = useSharedValue(0);
   const menuGesture = Gesture.Pan()
     .activeOffsetY([10, 999])
     .failOffsetX([-30, 30])
+    .simultaneousWithExternalGesture(menuScrollGesture)
     .onUpdate((event) => {
-      menuTranslateY.value = Math.max(0, event.translationY);
+      if (menuScrollOffset.value <= 0 && event.translationY > 0) {
+        menuTranslateY.value = event.translationY;
+      }
     })
     .onEnd((event) => {
-      if (event.translationY > 120) {
+      if (menuScrollOffset.value <= 0 && event.translationY > 120) {
         menuTranslateY.value = withTiming(height, { duration: 180 }, (finished) => {
           if (finished) runOnJS(closePlaceMenu)();
         });
@@ -518,14 +482,26 @@ export default function ForYouScreen() {
                 <Text style={[styles.menuTitle, { color: theme.text }]}>
                   {selectedPlace?.name || 'Place name'}
                 </Text>
+                {detailError ? (
+                  <Text style={[styles.menuDetail, { color: theme.mutedText }]}>{detailError}</Text>
+                ) : null}
               </View>
             </View>
-            <ScrollView
-              style={styles.menuScroll}
-              contentContainerStyle={styles.menuScrollContent}
-              showsVerticalScrollIndicator={false}
-              nestedScrollEnabled
-            >
+            <GestureDetector gesture={menuScrollGesture}>
+              <ScrollView
+                style={styles.menuScroll}
+                contentContainerStyle={styles.menuScrollContent}
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled
+                scrollEventThrottle={16}
+                onScroll={(event) => {
+                  const scrollOffset = event.nativeEvent.contentOffset.y;
+                  menuScrollOffset.value = scrollOffset;
+                  if (scrollOffset < -80) {
+                    closePlaceMenu()
+                  };
+                }}
+              >
             {isLoadingDetails ? (
               <View style={[styles.menuImage, styles.loadingImage, { backgroundColor: theme.elevatedSurface }]}>
                 <ActivityIndicator size="large" color={theme.text} />
@@ -595,18 +571,18 @@ export default function ForYouScreen() {
               </Pressable>
             ) : null}
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {selectedPlaceDetail?.website || 'Website loading'}
+              {selectedPlaceDetail?.website || 'No website listed'}
             </Text>
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {getPlaceHighlights(selectedPlaceDetail).join(', ') || 'Highlights loading'}
+              {getPlaceHighlights(selectedPlaceDetail).join(', ') || 'No highlights available'}
             </Text>
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {selectedPlaceDetail?.categories?.map((category) => category.title).join(', ') || 'Categories loading'}
+              {selectedPlaceDetail?.categories?.map((category) => category.title).join(', ') || 'No categories listed'}
             </Text>
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              Hours: {selectedPlaceDetail?.operation_hours?.hours?.[0]?.hours || 'Hours loading'}
+              Hours: {selectedPlaceDetail?.operation_hours?.hours?.[0]?.hours || 'Hours unavailable'}
             </Text>
-            {hasPlaceCoordinates ? (
+            {hasPlaceCoordinates && Platform.OS !== 'web' ? (
               <MapView
                 style={styles.menuMap}
                 onPress={() => openPlaceInMaps(selectedPlace, placeLatitude, placeLongitude)}
@@ -622,6 +598,13 @@ export default function ForYouScreen() {
                   title={selectedPlace?.name}
                 />
               </MapView>
+            ) : hasPlaceCoordinates ? (
+              <Pressable
+                style={[styles.menuMap, styles.webMapFallback]}
+                onPress={() => openPlaceInMaps(selectedPlace, placeLatitude, placeLongitude)}
+              >
+                <Text style={styles.webMapFallbackText}>Open location in Google Maps</Text>
+              </Pressable>
             ) : null}
             <View style={styles.menuActions}>
               <Pressable style={[styles.menuSecondaryButton, { borderColor: theme.border }]} onPress={closePlaceMenu}>
@@ -640,7 +623,8 @@ export default function ForYouScreen() {
                 <Text style={styles.menuPrimaryText}>{isSaved(selectedPlace?.id) ? 'Saved' : 'Save place'}</Text>
               </Pressable>
             </View>
-            </ScrollView>
+              </ScrollView>
+            </GestureDetector>
             </Animated.View>
           </View>
         </GestureDetector>
@@ -921,6 +905,16 @@ const styles = StyleSheet.create({
     marginTop: 14,
     overflow: 'hidden',
     width: '100%',
+  },
+  webMapFallback: {
+    alignItems: 'center',
+    backgroundColor: '#E8EEF7',
+    justifyContent: 'center',
+  },
+  webMapFallbackText: {
+    color: '#2454A6',
+    fontSize: 14,
+    fontWeight: '700',
   },
   menuLink: {
     textDecorationLine: 'underline',

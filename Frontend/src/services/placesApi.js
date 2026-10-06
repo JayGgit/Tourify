@@ -1,5 +1,6 @@
 const FYP_API_URL = process.env.EXPO_PUBLIC_FYP_API_URL || 'http://34.201.233.58:3000/fyp';
 const SEARCH_API_URL = FYP_API_URL.replace(/\/fyp\/?$/, '/search');
+const API_BASE_URL = FYP_API_URL.replace(/\/fyp\/?$/, '');
 
 const interestQueries = {
   Food: 'restaurants',
@@ -110,4 +111,12 @@ export async function searchPlaces(location, query, offset = 0) {
   }
 
   return result.map(normalizePlace);
+}
+
+export async function getPlaceDetails(placeId) {
+  const response = await fetch(`${API_BASE_URL}/businesses/${encodeURIComponent(placeId)}`);
+  if (!response.ok) {
+    throw new Error(`Place details could not be loaded (${response.status}).`);
+  }
+  return response.json();
 }
