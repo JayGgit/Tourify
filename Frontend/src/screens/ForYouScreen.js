@@ -1,17 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, FlatList, Dimensions, Image, ActivityIndicator, Modal, ScrollView, Linking, Platform } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Pressable, FlatList, Dimensions, Image, ActivityIndicator, Modal, ScrollView, Linking, Platform } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import { useSavedPlaces } from '../context/SavedPlacesContext';
 import { useTheme } from '../context/ThemeContext';
 import { ErrorState, LoadingState } from '../components/LoadState';
-import { getRecommendedPlaces, getPlaceDetails } from '../services/placesApi';
+import { getRecommendedPlaces, searchPlaces } from '../services/placesApi';
 import { useProfile } from '../context/ProfileContext';
+import { SERPAPI_KEY } from '../config';
 import * as Location from 'expo-location';
+import MapView, { Marker } from 'react-native-maps';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, runOnUI, useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
-
-const MapView = Platform.OS === 'web' ? null : require('react-native-maps').default;
-const Marker = Platform.OS === 'web' ? null : require('react-native-maps').Marker;
 
 const { height, width } = Dimensions.get('window');
 const cardHeight = height * 0.68;
@@ -50,6 +49,51 @@ function getPlaceHighlights(place) {
     .filter((feature) => feature.is_active)
     .slice(0, 5)
     .map((feature) => feature.title);
+}
+
+async function getPlaceDetails(place) {
+  if (!SERPAPI_KEY) {
+    throw new Error('SerpApi is not configured. Set EXPO_PUBLIC_SERPAPI_KEY in Frontend/.env and restart Expo.');
+  }
+
+  const searchParams = new URLSearchParams({
+    engine: 'yelp',
+    find_desc: place.name,
+    find_loc: 'Los Angeles',
+    api_key: SERPAPI_KEY,
+  });
+  const searchResponse = await fetch(`https://serpapi.com/search.json?${searchParams.toString()}`);
+  if (!searchResponse.ok) {
+    throw new Error(`Place search could not be loaded (${searchResponse.status}).`);
+  }
+
+  const searchJson = await searchResponse.json();
+  const matchingResult = searchJson.organic_results?.find((result) => result.place_ids?.includes(place.id))
+    || searchJson.organic_results?.[0];
+  const placeSlug = matchingResult?.place_ids?.find((placeId) => placeId !== place.id)
+    || matchingResult?.link?.match(/\/biz\/([^?]+)/)?.[1];
+
+  if (!placeSlug) {
+    throw new Error('A Yelp place slug could not be found.');
+  }
+
+  const params = new URLSearchParams({
+    engine: 'yelp_place',
+    place_id: placeSlug,
+    api_key: SERPAPI_KEY,
+  });
+  const response = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`Place details could not be loaded (${response.status}).`);
+  }
+
+  const json = await response.json();
+  const yelpBusinessUrl = matchingResult?.link?.split('?')[0]
+    || `https://www.yelp.com/biz/${placeSlug}`;
+  return {
+    ...json.place_results,
+    reviewsUrl: `${yelpBusinessUrl}#reviews`,
+  };
 }
 
 function DraggableCard({ item, baseColor, onSwipeLeft, onSwipeRight, onSave, onPress, dismissPlaceId, children }) {
@@ -135,10 +179,13 @@ export default function ForYouScreen() {
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState('');
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeSearch, setActiveSearch] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
   const [hasMore, setHasMore] = useState(true);
   const [selectedPlace, setSelectedPlace] = useState(null);
   const [selectedPlaceDetail, setSelectedPlaceDetail] = useState(null);
-  const [detailError, setDetailError] = useState('');
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [dismissPlaceId, setDismissPlaceId] = useState(null);
@@ -146,22 +193,35 @@ export default function ForYouScreen() {
   const detailCacheRef = useRef({});
   const detailRequestsRef = useRef({});
   const placeRequestIdRef = useRef(0);
+  const feedRequestIdRef = useRef(0);
+  const recommendationPageRef = useRef(0);
   const menuTranslateY = useSharedValue(0);
   const { isSaved, savePlace } = useSavedPlaces();
   const { theme } = useTheme();
   const { profile } = useProfile();
 
   const loadPlaces = async () => {
+    const requestId = ++feedRequestIdRef.current;
     setStatus('loading');
     setError('');
+    setSearchQuery('');
+    setActiveSearch('');
+    setSearchError('');
+    setIsSearching(false);
+    recommendationPageRef.current = 0;
 
     try {
       const currentLocation = await getUserLocation().catch(() => fallbackLocation);
+      if (requestId !== feedRequestIdRef.current) return;
       setLocation(currentLocation);
-      setData(await getRecommendedPlaces(currentLocation, 0, profile));
-      setHasMore(true);
+      const places = await getRecommendedPlaces(currentLocation, 0, profile);
+      if (requestId !== feedRequestIdRef.current) return;
+      setData(places);
+      setHasMore(places.length > 0);
+      recommendationPageRef.current = 1;
       setStatus('success');
     } catch (loadError) {
+      if (requestId !== feedRequestIdRef.current) return;
       setError(loadError.message);
       setStatus('error');
     }
@@ -170,19 +230,55 @@ export default function ForYouScreen() {
   const loadMorePlaces = async () => {
     if (status !== 'success' || isLoadingMore || !hasMore) return;
 
+    const requestId = feedRequestIdRef.current;
     setIsLoadingMore(true);
     try {
-      const nextPlaces = await getRecommendedPlaces(location, data.length, profile);
+      const nextPlaces = activeSearch
+        ? await searchPlaces(location, activeSearch, data.length)
+        : await getRecommendedPlaces(location, recommendationPageRef.current, profile);
+      if (requestId !== feedRequestIdRef.current) return;
       const existingIds = new Set(data.map((place) => place.id));
       const uniquePlaces = nextPlaces.filter((place) => !existingIds.has(place.id));
 
       setData((currentPlaces) => [...currentPlaces, ...uniquePlaces]);
-      setHasMore(uniquePlaces.length > 0);
+      setHasMore(nextPlaces.length > 0);
+      if (!activeSearch && nextPlaces.length > 0) recommendationPageRef.current += 1;
     } catch (loadError) {
+      if (requestId !== feedRequestIdRef.current) return;
       setError(loadError.message);
     } finally {
       setIsLoadingMore(false);
     }
+  };
+
+  const handleSearch = async () => {
+    const query = searchQuery.trim();
+    setSearchError('');
+
+    if (!query) {
+      setSearchQuery('');
+      await loadPlaces();
+      return;
+    }
+
+    const requestId = ++feedRequestIdRef.current;
+    setIsSearching(true);
+    try {
+      const results = await searchPlaces(location, query);
+      if (requestId !== feedRequestIdRef.current) return;
+      setData(results);
+      setActiveSearch(query);
+      setHasMore(results.length > 0);
+    } catch (searchLoadError) {
+      if (requestId !== feedRequestIdRef.current) return;
+      setSearchError(searchLoadError.message);
+    } finally {
+      if (requestId === feedRequestIdRef.current) setIsSearching(false);
+    }
+  };
+
+  const clearSearch = () => {
+    loadPlaces();
   };
 
   const handleSwipeLeft = (placeId) => {
@@ -207,7 +303,7 @@ export default function ForYouScreen() {
       return detailRequestsRef.current[place.id];
     }
 
-    const request = getPlaceDetails(place.id)
+    const request = getPlaceDetails(place)
       .then((details) => {
         detailCacheRef.current[place.id] = details;
         return details;
@@ -226,7 +322,6 @@ export default function ForYouScreen() {
     placeRequestIdRef.current = requestId;
     setSelectedPlace(place);
     setSelectedPlaceDetail(cachedDetails || null);
-    setDetailError('');
     setIsLoadingDetails(!cachedDetails);
 
     loadPlaceDetail(place)
@@ -237,7 +332,6 @@ export default function ForYouScreen() {
         if (placeRequestIdRef.current === requestId) {
           console.error(loadError);
           setSelectedPlaceDetail(null);
-          setDetailError(loadError.message);
         }
       })
       .finally(() => {
@@ -266,19 +360,14 @@ export default function ForYouScreen() {
     }
   }, [selectedPlace]);
 
-  const menuScrollGesture = Gesture.Native();
-  const menuScrollOffset = useSharedValue(0);
   const menuGesture = Gesture.Pan()
     .activeOffsetY([10, 999])
     .failOffsetX([-30, 30])
-    .simultaneousWithExternalGesture(menuScrollGesture)
     .onUpdate((event) => {
-      if (menuScrollOffset.value <= 0 && event.translationY > 0) {
-        menuTranslateY.value = event.translationY;
-      }
+      menuTranslateY.value = Math.max(0, event.translationY);
     })
     .onEnd((event) => {
-      if (menuScrollOffset.value <= 0 && event.translationY > 120) {
+      if (event.translationY > 120) {
         menuTranslateY.value = withTiming(height, { duration: 180 }, (finished) => {
           if (finished) runOnJS(closePlaceMenu)();
         });
@@ -354,6 +443,44 @@ export default function ForYouScreen() {
         <View style={styles.feedHeader}>
           <Text style={[styles.eyebrow, { color: theme.mutedText }]}>Recommended for you</Text>
           <Text style={[styles.title, { color: theme.text }]}>For You</Text>
+          <View style={[styles.searchBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Text style={styles.searchIcon}>⌕</Text>
+            <TextInput
+              accessibilityLabel="Search places by name or category"
+              placeholder="Search by place or category"
+              placeholderTextColor={theme.mutedText}
+              style={[styles.searchInput, { color: theme.text }]}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onSubmitEditing={handleSearch}
+              returnKeyType="search"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!isSearching}
+            />
+            {searchQuery.length > 0 ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Clear place search"
+                onPress={clearSearch}
+                style={styles.searchAction}
+              >
+                <Text style={[styles.searchActionText, { color: theme.mutedText }]}>Clear</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Search places"
+              onPress={handleSearch}
+              disabled={isSearching}
+              style={styles.searchAction}
+            >
+              {isSearching
+                ? <ActivityIndicator color={theme.mutedText} />
+                : <Text style={styles.searchButtonText}>Search</Text>}
+            </Pressable>
+          </View>
+          {searchError ? <Text style={styles.searchError}>{searchError}</Text> : null}
         </View>
 
         <FlatList
@@ -364,7 +491,7 @@ export default function ForYouScreen() {
           onEndReached={loadMorePlaces}
           onEndReachedThreshold={0.6}
           ListFooterComponent={isLoadingMore ? <ActivityIndicator style={styles.footer} color={theme.mutedText} /> : null}
-          ListEmptyComponent={<Text style={[styles.emptyText, { color: theme.mutedText }]}>No recommendations found.</Text>}
+          ListEmptyComponent={<Text style={[styles.emptyText, { color: theme.mutedText }]}>{activeSearch ? `No places found for "${activeSearch}".` : 'No recommendations found.'}</Text>}
           pagingEnabled
           showsVerticalScrollIndicator={false}
           snapToInterval={cardHeight + 12}
@@ -391,26 +518,14 @@ export default function ForYouScreen() {
                 <Text style={[styles.menuTitle, { color: theme.text }]}>
                   {selectedPlace?.name || 'Place name'}
                 </Text>
-                {detailError ? (
-                  <Text style={[styles.menuDetail, { color: theme.mutedText }]}>{detailError}</Text>
-                ) : null}
               </View>
             </View>
-            <GestureDetector gesture={menuScrollGesture}>
-              <ScrollView
-                style={styles.menuScroll}
-                contentContainerStyle={styles.menuScrollContent}
-                showsVerticalScrollIndicator={false}
-                nestedScrollEnabled
-                scrollEventThrottle={16}
-                onScroll={(event) => {
-                  const scrollOffset = event.nativeEvent.contentOffset.y;
-                  menuScrollOffset.value = scrollOffset;
-                  if (scrollOffset < -80) {
-                    closePlaceMenu()
-                  };
-                }}
-              >
+            <ScrollView
+              style={styles.menuScroll}
+              contentContainerStyle={styles.menuScrollContent}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+            >
             {isLoadingDetails ? (
               <View style={[styles.menuImage, styles.loadingImage, { backgroundColor: theme.elevatedSurface }]}>
                 <ActivityIndicator size="large" color={theme.text} />
@@ -480,18 +595,18 @@ export default function ForYouScreen() {
               </Pressable>
             ) : null}
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {selectedPlaceDetail?.website || 'No website listed'}
+              {selectedPlaceDetail?.website || 'Website loading'}
             </Text>
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {getPlaceHighlights(selectedPlaceDetail).join(', ') || 'No highlights available'}
+              {getPlaceHighlights(selectedPlaceDetail).join(', ') || 'Highlights loading'}
             </Text>
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {selectedPlaceDetail?.categories?.map((category) => category.title).join(', ') || 'No categories listed'}
+              {selectedPlaceDetail?.categories?.map((category) => category.title).join(', ') || 'Categories loading'}
             </Text>
             <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              Hours: {selectedPlaceDetail?.operation_hours?.hours?.[0]?.hours || 'Hours unavailable'}
+              Hours: {selectedPlaceDetail?.operation_hours?.hours?.[0]?.hours || 'Hours loading'}
             </Text>
-            {hasPlaceCoordinates && Platform.OS !== 'web' ? (
+            {hasPlaceCoordinates ? (
               <MapView
                 style={styles.menuMap}
                 onPress={() => openPlaceInMaps(selectedPlace, placeLatitude, placeLongitude)}
@@ -507,13 +622,6 @@ export default function ForYouScreen() {
                   title={selectedPlace?.name}
                 />
               </MapView>
-            ) : hasPlaceCoordinates ? (
-              <Pressable
-                style={[styles.menuMap, styles.webMapFallback]}
-                onPress={() => openPlaceInMaps(selectedPlace, placeLatitude, placeLongitude)}
-              >
-                <Text style={styles.webMapFallbackText}>Open location in Google Maps</Text>
-              </Pressable>
             ) : null}
             <View style={styles.menuActions}>
               <Pressable style={[styles.menuSecondaryButton, { borderColor: theme.border }]} onPress={closePlaceMenu}>
@@ -532,8 +640,7 @@ export default function ForYouScreen() {
                 <Text style={styles.menuPrimaryText}>{isSaved(selectedPlace?.id) ? 'Saved' : 'Save place'}</Text>
               </Pressable>
             </View>
-              </ScrollView>
-            </GestureDetector>
+            </ScrollView>
             </Animated.View>
           </View>
         </GestureDetector>
@@ -577,7 +684,47 @@ const styles = StyleSheet.create({
   feedHeader: {
     paddingHorizontal: 20,
     paddingTop: 18,
-    paddingBottom: 6,
+    paddingBottom: 12,
+  },
+  searchBox: {
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 48,
+    paddingHorizontal: 12,
+  },
+  searchIcon: {
+    color: '#4C6FFF',
+    fontSize: 25,
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    minHeight: 46,
+    paddingVertical: 0,
+  },
+  searchAction: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+    minHeight: 36,
+    minWidth: 36,
+  },
+  searchActionText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  searchButtonText: {
+    color: '#4C6FFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  searchError: {
+    color: '#DC2626',
+    fontSize: 13,
+    marginTop: 8,
   },
   emptyText: {
     padding: 20,
@@ -774,16 +921,6 @@ const styles = StyleSheet.create({
     marginTop: 14,
     overflow: 'hidden',
     width: '100%',
-  },
-  webMapFallback: {
-    alignItems: 'center',
-    backgroundColor: '#E8EEF7',
-    justifyContent: 'center',
-  },
-  webMapFallbackText: {
-    color: '#2454A6',
-    fontSize: 14,
-    fontWeight: '700',
   },
   menuLink: {
     textDecorationLine: 'underline',
