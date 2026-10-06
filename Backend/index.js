@@ -3,6 +3,7 @@ const express = require('express');
 const axios = require('axios');
 const crypto = require('node:crypto');
 const { MongoClient } = require('mongodb');
+const { chromium } = require('playwright');
 
 const app = express();
 const port = 3000;
@@ -40,6 +41,7 @@ app.use((req, res, next) => {
 });
 
 let accounts;
+let browserPromise;
 
 function derivePasswordHash(password, salt) {
   return new Promise((resolve, reject) => {
@@ -170,10 +172,19 @@ function yelpHeaders() {
 }
 
 function formatHours(hours) {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const formatTime = (value) => {
+    if (!value) return '?';
+    const numericValue = Number(value);
+    const hour = Math.floor(numericValue / 100);
+    const minute = numericValue % 100;
+    const suffix = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour % 12 || 12;
+    return `${displayHour}:${String(minute).padStart(2, '0')} ${suffix}`;
+  };
+
   return (hours || []).map((entry) => {
-    const start = entry.start?.padStart(4, '0');
-    const end = entry.end?.padStart(4, '0');
-    return `${entry.day}: ${start || '?'}-${end || '?'}`;
+    return `${days[entry.day] || 'Day'} ${formatTime(entry.start)} - ${formatTime(entry.end)}`;
   }).join(', ');
 }
 
@@ -267,6 +278,62 @@ app.post('/auth/google', async (req, res) => {
   }
 });
 
+function getBrowser() {
+  if (!browserPromise) {
+    browserPromise = chromium.launch({ headless: true }).catch((error) => {
+      browserPromise = undefined;
+      throw error;
+    });
+  }
+
+  return browserPromise;
+}
+
+async function scrapeYelpPhotosById(businessId, maxPhotos = 6) {
+  let context;
+
+  try {
+    const browser = await getBrowser();
+    context = await browser.newContext({
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      locale: 'en-US',
+    });
+    const page = await context.newPage();
+
+    await page.goto(`https://www.yelp.com/biz_photos/${encodeURIComponent(businessId)}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    });
+
+    return await page.locator('img').evaluateAll((images, photoLimit) => {
+      const photoPattern =
+        /^https:\/\/s3-media\d+\.fl\.yelpcdn\.com\/bphoto\/[a-zA-Z0-9_-]+\/(?:o|258s|348s|l|m|ms|60s)\.jpg$/;
+      const photos = [];
+      const seen = new Set();
+
+      for (const image of images) {
+        if (!photoPattern.test(image.src)) continue;
+
+        const fullResUrl = image.src.replace(/\/(?:258s|348s|l|m|ms|60s)\.jpg$/, '/o.jpg');
+        if (!seen.has(fullResUrl)) {
+          seen.add(fullResUrl);
+          photos.push(fullResUrl);
+        }
+
+        if (photos.length >= photoLimit) break;
+      }
+
+      return photos;
+    }, maxPhotos);
+  } catch (error) {
+    console.error('Error scraping Yelp business photos with Playwright:', error.message);
+    return [];
+  } finally {
+    await context?.close();
+  }
+}
+
 async function getBusinessDetails(businessId) {
   const response = await axios.get(
     `https://api.yelp.com/v3/businesses/${encodeURIComponent(businessId)}`,
@@ -277,10 +344,11 @@ async function getBusinessDetails(businessId) {
   );
   const business = response.data;
   const attributes = business.attributes || {};
+  const images = await scrapeYelpPhotosById(businessId);
 
   return {
     ...business,
-    images: business.photos || [],
+    images,
     address: business.location?.display_address?.join(', ') || '',
     phone: business.display_phone || business.phone || '',
     reviews: business.review_count ? `${business.review_count.toLocaleString()} reviews` : 'No reviews yet',
