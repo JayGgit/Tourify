@@ -48,7 +48,7 @@ function mapBusiness(business) {
   };
 }
 
-async function getPlaces(location, term, offset) {
+async function getPlaces(location, term, offset, limit = 10) {
   const response = await axios.get('https://api.yelp.com/v3/businesses/search', {
     headers: {
       Authorization: `Bearer ${API_KEY}`,
@@ -56,7 +56,7 @@ async function getPlaces(location, term, offset) {
     params: {
       location,
       term,
-      limit: 10,
+      limit,
       offset: getOffset(offset),
     },
   });
@@ -82,9 +82,60 @@ app.get('/fyp', async (req, res) => {
     return res.status(400).send('Missing location parameter');
   }
 
+  const page = req.query.page == null ? 0 : Number(req.query.page);
+  if (!Number.isInteger(page) || page < 0 || page > 120) {
+    return res.status(400).json({ error: 'page must be an integer between 0 and 120' });
+  }
+
   try {
-    const term = req.query.query || req.query.term;
-    res.json(await getPlaces(req.query.location, term, req.query.offset));
+    const categories = [
+      'restaurants',
+      'parks',
+      'tourist attractions',
+      'landmarks and historical sites',
+      'museums',
+      'shopping',
+      'nightlife',
+      'beaches',
+    ];
+    const interests = typeof req.query.interests === 'string'
+      ? req.query.interests
+        .split(',')
+        .map((interest) => interest.trim().slice(0, 60))
+        .filter(Boolean)
+        .slice(0, 8)
+      : [];
+    const personalizedQuery = typeof req.query.query === 'string'
+      ? req.query.query.trim().slice(0, 200)
+      : '';
+    const terms = [...categories, ...interests, personalizedQuery]
+      .filter(Boolean)
+      .map((term) => term.toLowerCase());
+    const termCounts = terms.reduce((counts, term) => {
+      counts.set(term, (counts.get(term) || 0) + 1);
+      return counts;
+    }, new Map());
+    const termLanes = new Map();
+    const resultsByCategory = await Promise.all(
+      terms.map((term) => {
+        const lane = termLanes.get(term) || 0;
+        termLanes.set(term, lane + 1);
+        const offset = page * termCounts.get(term) + lane;
+        return getPlaces(req.query.location, term, offset, 1);
+      })
+    );
+    const places = [];
+    const seenIds = new Set();
+
+    for (const categoryResults of resultsByCategory) {
+      const place = categoryResults[0];
+      if (place && !seenIds.has(place.id)) {
+        seenIds.add(place.id);
+        places.push(place);
+      }
+    }
+
+    res.json(places);
   } catch (error) {
     console.error('Failed to fetch recommended places:', error.message);
     res.status(502).json({ error: 'Failed to fetch recommended places' });
@@ -92,12 +143,13 @@ app.get('/fyp', async (req, res) => {
 });
 
 app.get('/search', async (req, res) => {
-  if (!req.query.location || !req.query.search) {
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  if (!req.query.location || !search) {
     return res.status(400).send('Missing location or search query parameters');
   }
 
   try {
-    res.json(await getPlaces(req.query.location, req.query.search, req.query.offset));
+    res.json(await getPlaces(req.query.location, search, req.query.offset));
   } catch (error) {
     console.error('Failed to search places:', error.message);
     res.status(502).json({ error: 'Failed to search places' });
