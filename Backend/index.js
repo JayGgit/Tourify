@@ -3,11 +3,11 @@ const express = require('express');
 const axios = require('axios');
 const crypto = require('node:crypto');
 const { MongoClient } = require('mongodb');
-const { chromium } = require('playwright');
 
 const app = express();
 const port = 3000;
 const API_KEY = process.env.YELP_API_KEY;
+const HASDATA_API_KEY = process.env.HASDATA_API_KEY;
 
 app.use(express.json({ limit: '10kb' }));
 app.use((req, res, next) => {
@@ -19,7 +19,6 @@ app.use((req, res, next) => {
 });
 
 let accounts;
-let browserPromise;
 
 function derivePasswordHash(password, salt) {
   return new Promise((resolve, reject) => {
@@ -105,60 +104,40 @@ async function getBusinessURL(businessId) {
   return response.data.url;
 }
 
-function getBrowser() {
-  if (!browserPromise) {
-    browserPromise = chromium.launch({ headless: true }).catch((error) => {
-      browserPromise = undefined;
-      throw error;
-    });
+async function getHasDataYelpPhotos(businessId) {
+  if (!HASDATA_API_KEY) {
+    const error = new Error('HASDATA_API_KEY is not configured.');
+    error.code = 'HASDATA_NOT_CONFIGURED';
+    throw error;
   }
 
-  return browserPromise;
-}
-
-async function scrapeYelpPhotosById(businessId, maxPhotos = 6) {
-  let context;
-
+  let response;
   try {
-    const browser = await getBrowser();
-    context = await browser.newContext({
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      locale: 'en-US',
-    });
-    const page = await context.newPage();
-
-    await page.goto(`https://www.yelp.com/biz_photos/${encodeURIComponent(businessId)}`, {
-      waitUntil: 'domcontentloaded',
+    response = await axios.get('https://api.hasdata.com/scrape/yelp/place', {
+      params: {
+        placeId: businessId,
+      },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': HASDATA_API_KEY,
+      },
       timeout: 30000,
     });
-
-    return await page.locator('img').evaluateAll((images, photoLimit) => {
-      const photoPattern =
-        /^https:\/\/s3-media\d+\.fl\.yelpcdn\.com\/bphoto\/[a-zA-Z0-9_-]+\/(?:o|258s|348s|l|m|ms|60s)\.jpg$/;
-      const photos = [];
-      const seen = new Set();
-
-      for (const image of images) {
-        if (!photoPattern.test(image.src)) continue;
-
-        const fullResUrl = image.src.replace(/\/(?:258s|348s|l|m|ms|60s)\.jpg$/, '/o.jpg');
-        if (!seen.has(fullResUrl)) {
-          seen.add(fullResUrl);
-          photos.push(fullResUrl);
-        }
-
-        if (photos.length >= photoLimit) break;
-      }
-
-      return photos;
-    }, maxPhotos);
   } catch (error) {
-    console.error('Error scraping Yelp business photos with Playwright:', error.message);
-    return [];
-  } finally {
-    await context?.close();
+    const providerMessage = typeof error.response?.data === 'string'
+      ? error.response.data
+      : error.response?.data?.message || error.response?.data?.error;
+    console.error('HasData Yelp request failed:', providerMessage || error.message);
+    throw error;
   }
+
+  const urls = response.data?.placeResult?.images;
+  if (!Array.isArray(urls)) {
+    throw new Error('HasData returned no Yelp place images.');
+  }
+
+  return [...new Set(urls)]
+    .filter((url) => typeof url === 'string' && /^https:\/\/s3-media\d+\.fl\.yelpcdn\.com\/bphoto\/.+\/l\.jpg$/i.test(url))
 }
 
 async function getBusinessDetails(businessId) {
@@ -171,7 +150,7 @@ async function getBusinessDetails(businessId) {
   );
   const business = response.data;
   const attributes = business.attributes || {};
-  const images = await scrapeYelpPhotosById(businessId);
+  const images = await getHasDataYelpPhotos(businessId);
 
   return {
     ...business,
@@ -293,6 +272,9 @@ app.get('/businesses/:businessId', async (req, res) => {
   } catch (error) {
     const status = error.response?.status;
     console.error('Failed to fetch business details:', error.message);
+    if (error.code === 'HASDATA_NOT_CONFIGURED') {
+      return res.status(500).json({ error: 'Photo service is not configured.' });
+    }
     res.status(status === 404 ? 404 : 502).json({ error: 'Failed to fetch business details' });
   }
 });
