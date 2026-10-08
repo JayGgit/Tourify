@@ -4,9 +4,8 @@ import ScreenContainer from '../components/ScreenContainer';
 import { useSavedPlaces } from '../context/SavedPlacesContext';
 import { useTheme } from '../context/ThemeContext';
 import { ErrorState, LoadingState } from '../components/LoadState';
-import { getRecommendedPlaces, searchPlaces } from '../services/placesApi';
+import { getRecommendedPlaces, getPlaceDetails, searchPlaces } from '../services/placesApi';
 import { useProfile } from '../context/ProfileContext';
-import { SERPAPI_KEY } from '../config';
 import * as Location from 'expo-location';
 import MapView, { Marker } from 'react-native-maps';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -49,51 +48,6 @@ function getPlaceHighlights(place) {
     .filter((feature) => feature.is_active)
     .slice(0, 5)
     .map((feature) => feature.title);
-}
-
-async function getPlaceDetails(place) {
-  if (!SERPAPI_KEY) {
-    throw new Error('SerpApi is not configured. Set EXPO_PUBLIC_SERPAPI_KEY in Frontend/.env and restart Expo.');
-  }
-
-  const searchParams = new URLSearchParams({
-    engine: 'yelp',
-    find_desc: place.name,
-    find_loc: 'Los Angeles',
-    api_key: SERPAPI_KEY,
-  });
-  const searchResponse = await fetch(`https://serpapi.com/search.json?${searchParams.toString()}`);
-  if (!searchResponse.ok) {
-    throw new Error(`Place search could not be loaded (${searchResponse.status}).`);
-  }
-
-  const searchJson = await searchResponse.json();
-  const matchingResult = searchJson.organic_results?.find((result) => result.place_ids?.includes(place.id))
-    || searchJson.organic_results?.[0];
-  const placeSlug = matchingResult?.place_ids?.find((placeId) => placeId !== place.id)
-    || matchingResult?.link?.match(/\/biz\/([^?]+)/)?.[1];
-
-  if (!placeSlug) {
-    throw new Error('A Yelp place slug could not be found.');
-  }
-
-  const params = new URLSearchParams({
-    engine: 'yelp_place',
-    place_id: placeSlug,
-    api_key: SERPAPI_KEY,
-  });
-  const response = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`Place details could not be loaded (${response.status}).`);
-  }
-
-  const json = await response.json();
-  const yelpBusinessUrl = matchingResult?.link?.split('?')[0]
-    || `https://www.yelp.com/biz/${placeSlug}`;
-  return {
-    ...json.place_results,
-    reviewsUrl: `${yelpBusinessUrl}#reviews`,
-  };
 }
 
 function DraggableCard({ item, baseColor, onSwipeLeft, onSwipeRight, onSave, onPress, dismissPlaceId, children }) {
@@ -303,7 +257,7 @@ export default function ForYouScreen() {
       return detailRequestsRef.current[place.id];
     }
 
-    const request = getPlaceDetails(place)
+    const request = getPlaceDetails(place.id)
       .then((details) => {
         detailCacheRef.current[place.id] = details;
         return details;
