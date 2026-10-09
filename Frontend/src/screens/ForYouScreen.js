@@ -52,6 +52,48 @@ function getPlaceHighlights(place) {
     .map((feature) => feature.title);
 }
 
+function getDetailImages(place) {
+  if (Array.isArray(place?.images) && place.images.length) return place.images;
+  if (Array.isArray(place?.photos) && place.photos.length) return place.photos;
+  return place?.image_url ? [place.image_url] : [];
+}
+
+function getDetailAddress(place) {
+  return place?.address
+    || place?.location?.display_address?.join(', ')
+    || [
+      place?.location?.address1,
+      place?.location?.city,
+      place?.location?.state,
+      place?.location?.zip_code,
+    ].filter(Boolean).join(', ');
+}
+
+function getDetailPhone(place) {
+  return place?.phone || place?.display_phone;
+}
+
+function getDetailReviews(place) {
+  return place?.reviews
+    || (place?.review_count ? `${Number(place.review_count).toLocaleString()} reviews` : '');
+}
+
+function getDetailReviewsUrl(place) {
+  return place?.reviewsUrl || place?.url;
+}
+
+function getDetailHours(place) {
+  return place?.operation_hours?.hours?.[0]?.hours
+    || place?.hours?.[0]?.open?.map(({ start, end }) => `${start} - ${end}`).join(', ');
+}
+
+function getDetailCoordinates(place) {
+  return {
+    latitude: Number(place?.latitude ?? place?.coordinates?.latitude),
+    longitude: Number(place?.longitude ?? place?.coordinates?.longitude),
+  };
+}
+
 function DraggableCard({ item, baseColor, onSwipeLeft, onSwipeRight, onSave, onPress, dismissPlaceId, children }) {
   const x = useSharedValue(0);
   const y = useSharedValue(0);
@@ -298,9 +340,15 @@ export default function ForYouScreen() {
   if (status === 'loading') return <LoadingState />;
   if (status === 'error') return <ErrorState message={error} onRetry={loadPlaces} />;
 
-  const placeLatitude = Number(selectedPlace?.latitude);
-  const placeLongitude = Number(selectedPlace?.longitude);
+  const detailPlace = selectedPlaceDetail || selectedPlace;
+  const { latitude: placeLatitude, longitude: placeLongitude } = getDetailCoordinates(detailPlace);
   const hasPlaceCoordinates = Number.isFinite(placeLatitude) && Number.isFinite(placeLongitude);
+  const detailImages = getDetailImages(selectedPlaceDetail);
+  const detailAddress = getDetailAddress(selectedPlaceDetail);
+  const detailPhone = getDetailPhone(selectedPlaceDetail);
+  const detailReviews = getDetailReviews(selectedPlaceDetail);
+  const detailReviewsUrl = getDetailReviewsUrl(selectedPlaceDetail);
+  const detailHours = getDetailHours(selectedPlaceDetail);
 
   const renderItem = ({ item }) => (
     <DraggableCard item={item} baseColor={theme.surface} onSave={handleSave} onPress={handlePlacePress} onSwipeLeft={handleSwipeLeft} onSwipeRight={handleSwipeLeft} dismissPlaceId={dismissPlaceId}>
@@ -415,7 +463,7 @@ export default function ForYouScreen() {
               <View style={[styles.menuImage, styles.loadingImage, { backgroundColor: theme.elevatedSurface }]}>
                 <ActivityIndicator size="large" color={theme.text} />
               </View>
-            ) : selectedPlaceDetail?.images?.length ? (
+            ) : detailImages.length ? (
               <>
                 <ScrollView
                   horizontal
@@ -426,7 +474,7 @@ export default function ForYouScreen() {
                     setActiveImageIndex(Math.round(event.nativeEvent.contentOffset.x / menuImageWidth));
                   }}
                 >
-                  {selectedPlaceDetail.images.map((imageUrl, index) => (
+                  {detailImages.map((imageUrl, index) => (
                     <Image
                       key={`${imageUrl}-${index}`}
                       source={{ uri: imageUrl }}
@@ -436,7 +484,7 @@ export default function ForYouScreen() {
                   ))}
                 </ScrollView>
                 <View style={styles.imageDots}>
-                  {selectedPlaceDetail.images.map((imageUrl, index) => (
+                  {detailImages.map((imageUrl, index) => (
                     <View
                       key={`${imageUrl}-dot-${index}`}
                       style={[styles.imageDot, { backgroundColor: index === activeImageIndex ? theme.text : theme.border }]}
@@ -445,14 +493,21 @@ export default function ForYouScreen() {
                 </View>
               </>
             ) : (
-              <View style={[styles.menuImage, { backgroundColor: selectedPlace?.color || theme.elevatedSurface }]} />
+              <View style={[styles.menuImage, styles.menuImageFallback, { backgroundColor: selectedPlace?.color || theme.elevatedSurface }]}>
+                <Text style={styles.menuImageInitial}>{selectedPlace?.name?.charAt(0) || '?'}</Text>
+                <Text style={styles.menuImageFallbackText}>Photo unavailable</Text>
+              </View>
             )}
-            <Text style={[styles.menuMeta, { color: theme.mutedText }]}>
-              {selectedPlace?.category || 'Category'}  •  {selectedPlaceDetail?.address || selectedPlace?.distance || 'Loading'}
+            <View style={[styles.menuIntro, { borderColor: theme.border }]}>
+            <Text style={[styles.menuMeta, { color: theme.text }]}>
+              {selectedPlaceDetail?.categories?.map((category) => category.title).join(', ')
+                || selectedPlace?.category
+                || 'Category'}  •  {detailAddress || selectedPlace?.distance || 'Loading'}
             </Text>
             <Text style={[styles.menuContact, { color: theme.mutedText }]}>
-              {selectedPlaceDetail?.phone || 'Phone loading'}  •  {selectedPlaceDetail?.price || 'Price loading'}
+              {detailPhone || 'Phone unavailable'}  •  {selectedPlaceDetail?.price || 'Price unavailable'}
             </Text>
+            </View>
             <View style={[styles.menuStats, { borderColor: theme.border }]}>
               <View>
                 <Text style={[styles.statLabel, { color: theme.mutedText }]}>RATING</Text>
@@ -462,35 +517,47 @@ export default function ForYouScreen() {
                 <Text style={[styles.statLabel, { color: theme.mutedText }]}>REVIEWS</Text>
                 <Pressable
                   accessibilityRole="link"
-                  disabled={!selectedPlaceDetail?.reviewsUrl}
-                  onPress={() => Linking.openURL(selectedPlaceDetail.reviewsUrl)}
+                  disabled={!detailReviewsUrl}
+                  onPress={() => Linking.openURL(detailReviewsUrl)}
                 >
-                  <Text style={[styles.statValue, selectedPlaceDetail?.reviewsUrl && styles.menuLink, { color: theme.text }]}>
-                    {selectedPlaceDetail?.reviews ? `${selectedPlaceDetail.reviews} reviews` : selectedPlace?.reviews || 'Loading'}
+                  <Text style={[styles.statValue, detailReviewsUrl && styles.menuLink, { color: theme.text }]}>
+                    {detailReviews || selectedPlace?.reviews || 'Reviews unavailable'}
                   </Text>
                 </Pressable>
               </View>
             </View>
-            {selectedPlaceDetail?.full_menu ? (
+            {(selectedPlaceDetail?.full_menu || selectedPlaceDetail?.attributes?.menu_url) ? (
               <Pressable
                 accessibilityRole="link"
-                onPress={() => Linking.openURL(selectedPlaceDetail.full_menu)}
+                onPress={() => Linking.openURL(selectedPlaceDetail.full_menu || selectedPlaceDetail.attributes.menu_url)}
               >
                 <Text style={[styles.menuDetail, styles.menuLink, { color: theme.text }]}>View menu on Yelp</Text>
               </Pressable>
             ) : null}
-            <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {selectedPlaceDetail?.website || 'No website listed'}
-            </Text>
-            <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {getPlaceHighlights(selectedPlaceDetail).join(', ') || 'No highlights available'}
-            </Text>
-            <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              {selectedPlaceDetail?.categories?.map((category) => category.title).join(', ') || 'No categories listed'}
-            </Text>
-            <Text style={[styles.menuDetail, { color: theme.mutedText }]}>
-              Hours: {selectedPlaceDetail?.operation_hours?.hours?.[0]?.hours || 'Hours unavailable'}
-            </Text>
+            <View style={styles.menuDetails}>
+              <View style={styles.menuDetailRow}>
+                <Text style={[styles.detailLabel, { color: theme.mutedText }]}>WEBSITE</Text>
+                <Text style={[styles.menuDetail, { color: theme.text }]}>
+                  {selectedPlaceDetail?.website
+                    || selectedPlaceDetail?.attributes?.business_url
+                    || selectedPlaceDetail?.attributes?.BusinessUrl
+                    || selectedPlaceDetail?.attributes?.BusinessDisplayUrl
+                    || 'No website listed'}
+                </Text>
+              </View>
+              <View style={styles.menuDetailRow}>
+                <Text style={[styles.detailLabel, { color: theme.mutedText }]}>HIGHLIGHTS</Text>
+                <Text style={[styles.menuDetail, { color: theme.text }]}>{getPlaceHighlights(selectedPlaceDetail).join(', ') || 'No highlights available'}</Text>
+              </View>
+              <View style={styles.menuDetailRow}>
+                <Text style={[styles.detailLabel, { color: theme.mutedText }]}>CATEGORIES</Text>
+                <Text style={[styles.menuDetail, { color: theme.text }]}>{selectedPlaceDetail?.categories?.map((category) => category.title).join(', ') || 'No categories listed'}</Text>
+              </View>
+              <View style={styles.menuDetailRow}>
+                <Text style={[styles.detailLabel, { color: theme.mutedText }]}>HOURS</Text>
+                <Text style={[styles.menuDetail, { color: theme.text }]}>{detailHours || 'Hours unavailable'}</Text>
+              </View>
+            </View>
             {hasPlaceCoordinates && Platform.OS !== 'web' ? (
               <MapView
                 style={styles.menuMap}
@@ -706,11 +773,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
   },
   placeMenu: {
+    alignSelf: 'center',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
+    maxWidth: 760,
     paddingHorizontal: 22,
     paddingTop: 12,
     paddingBottom: 28,
+    width: '100%',
   },
   menuScroll: {
     maxHeight: height * 0.78,
@@ -758,15 +828,51 @@ const styles = StyleSheet.create({
   menuMeta: {
     fontSize: 14,
     marginTop: 8,
+    lineHeight: 21,
   },
   menuContact: {
     fontSize: 14,
     marginTop: 6,
   },
+  menuIntro: {
+    borderBottomWidth: 1,
+    paddingBottom: 14,
+  },
+  menuImageFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuImageInitial: {
+    color: '#FFFFFF',
+    fontSize: 54,
+    fontWeight: '800',
+  },
+  menuImageFallbackText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+    opacity: 0.85,
+  },
+  menuDetails: {
+    borderTopWidth: 1,
+    marginTop: 18,
+    paddingTop: 4,
+  },
+  menuDetailRow: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    paddingVertical: 12,
+  },
+  detailLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
   menuDetail: {
     fontSize: 13,
     lineHeight: 19,
-    marginTop: 8,
+    marginTop: 4,
   },
   menuMap: {
     borderRadius: 14,
