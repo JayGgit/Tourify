@@ -1,6 +1,7 @@
+import { API_URL } from '../config';
+
 const FYP_API_URL = process.env.EXPO_PUBLIC_FYP_API_URL || 'http://34.201.233.58:3000/fyp';
 const SEARCH_API_URL = FYP_API_URL.replace(/\/fyp\/?$/, '/search');
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 
 const interestQueries = {
   Food: 'restaurants',
