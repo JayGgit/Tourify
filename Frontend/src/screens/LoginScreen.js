@@ -15,20 +15,26 @@ export default function LoginScreen({ onLogin }) {
   const handleSubmit = async () => {
     setError('');
     setIsSubmitting(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
-      const response = await fetch(`${API_URL}/${mode}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
+      const endpoint = mode === 'register' ? 'register' : 'login';
+      const params = new URLSearchParams({
+        email: email.trim(),
+        password,
+      });
+      const response = await fetch(`${API_URL}/account/${endpoint}?${params.toString()}`, {
+        signal: controller.signal,
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Unable to authenticate.');
       onLogin(result.email);
     } catch (requestError) {
-      setError(requestError.message === 'Failed to fetch'
-        ? `Cannot reach the server at ${API_URL}. Make sure your phone and computer use the same Wi-Fi.`
+      setError(requestError.name === 'AbortError' || requestError.message === 'Failed to fetch'
+        ? `Cannot reach the Tourify server at ${API_URL}.`
         : requestError.message);
     } finally {
+      clearTimeout(timeout);
       setIsSubmitting(false);
     }
   };

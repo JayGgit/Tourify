@@ -32,13 +32,6 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: '10kb' }));
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
 
 let accounts;
 
@@ -419,9 +412,12 @@ app.get('/account/login', async (req, res) => {
 
   try {
     const account = await accounts.findOne({ email });
-    if (!account) return res.status(401).json({ error: 'Invalid email or password.' });
+    const saltValue = account?.passwordSalt || account?.salt;
+    if (!account || !saltValue || !account.passwordHash) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
 
-    const salt = Buffer.from(account.passwordSalt, 'hex');
+    const salt = Buffer.from(saltValue, 'hex');
     const storedHash = Buffer.from(account.passwordHash, 'hex');
     const suppliedHash = await derivePasswordHash(password, salt);
     if (!crypto.timingSafeEqual(storedHash, suppliedHash)) {
