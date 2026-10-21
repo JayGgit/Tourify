@@ -4,6 +4,25 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const PlannerContext = createContext(null);
 const SAVED_PLAN_KEY = 'tourify.savedPlan';
 
+function todayKey() {
+  const date = new Date();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function normalizeSavedPlan(plan) {
+  const savedAt = plan.savedAt || new Date().toISOString();
+  return {
+    ...plan,
+    id: plan.id || savedAt,
+    name: plan.name || 'Untitled plan',
+    date: plan.date || savedAt.slice(0, 10),
+    items: Array.isArray(plan.items) ? plan.items : [],
+    savedAt,
+  };
+}
+
 function toPlannerItem(place, index) {
   return {
     id: `saved-${place.id}`,
@@ -30,7 +49,7 @@ export function PlannerProvider({ children }) {
         const parsedPlan = JSON.parse(savedPlan);
         if (Array.isArray(parsedPlan.items)) setItems(parsedPlan.items);
         if (Array.isArray(parsedPlan.hiddenItems)) setHiddenItems(parsedPlan.hiddenItems);
-        if (Array.isArray(parsedPlan.savedPlans)) setSavedPlans(parsedPlan.savedPlans);
+        if (Array.isArray(parsedPlan.savedPlans)) setSavedPlans(parsedPlan.savedPlans.map(normalizeSavedPlan));
         if (parsedPlan.savedAt) setLastSavedAt(parsedPlan.savedAt);
       } catch {
         AsyncStorage.removeItem(SAVED_PLAN_KEY);
@@ -70,10 +89,12 @@ export function PlannerProvider({ children }) {
         return currentHidden.filter((item) => item.id !== itemId);
       });
     },
-    savePlan: () => {
+    savePlan: (name = 'Untitled plan', date = todayKey()) => {
       const savedAt = new Date().toISOString();
       const savedPlan = {
         id: savedAt,
+        name: name.trim() || 'Untitled plan',
+        date,
         savedAt,
         items: [...items],
       };
@@ -86,8 +107,39 @@ export function PlannerProvider({ children }) {
         savedAt,
       })).catch(() => {});
     },
+    updatePlan: (planId, updates) => {
+      setSavedPlans((currentPlans) => {
+        const updatedPlans = currentPlans.map((plan) => (
+          plan.id === planId
+            ? normalizeSavedPlan({ ...plan, ...updates, name: updates.name !== undefined ? updates.name.trim() : plan.name })
+            : plan
+        ));
+        AsyncStorage.setItem(SAVED_PLAN_KEY, JSON.stringify({
+          items,
+          hiddenItems,
+          savedPlans: updatedPlans,
+          savedAt: lastSavedAt,
+        })).catch(() => {});
+        return updatedPlans;
+      });
+    },
+    deletePlan: (planId) => {
+      setSavedPlans((currentPlans) => {
+        const updatedPlans = currentPlans.filter((plan) => plan.id !== planId);
+        AsyncStorage.setItem(SAVED_PLAN_KEY, JSON.stringify({
+          items,
+          hiddenItems,
+          savedPlans: updatedPlans,
+          savedAt: lastSavedAt,
+        })).catch(() => {});
+        return updatedPlans;
+      });
+    },
+    loadPlan: (plan) => {
+      setItems(plan.items || []);
+    },
     lastSavedAt,
-  }), [items, lastSavedAt]);
+  }), [items, hiddenItems, savedPlans, lastSavedAt]);
 
   return <PlannerContext.Provider value={value}>{children}</PlannerContext.Provider>;
 }

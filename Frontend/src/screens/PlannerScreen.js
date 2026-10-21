@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Alert } from 'react-native';
-import { View, Text, StyleSheet, Pressable, TextInput, KeyboardAvoidingView, Platform, Linking, Modal } from 'react-native';
+import { LayoutAnimation, View, Text, StyleSheet, Pressable, TextInput, KeyboardAvoidingView, Platform, Linking, Modal, ScrollView } from 'react-native';
 import DraggableFlatList from 'react-native-draggable-flatlist';
 import { Swipeable } from 'react-native-gesture-handler';
 import ScreenContainer from '../components/ScreenContainer';
@@ -25,14 +25,40 @@ function sortByTime(items) {
   return [...items].sort((first, second) => timeToMinutes(first.time) - timeToMinutes(second.time));
 }
 
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function dateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatDate(value) {
+  return new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 export default function PlannerScreen() {
   const [editingId, setEditingId] = useState(null);
   const [draftTime, setDraftTime] = useState('');
   const [timeError, setTimeError] = useState('');
   const [showSavedPlans, setShowSavedPlans] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
-  const { items, setItems, hiddenItems, savedPlans, savePlan, removeFromPlanner, hideFromPlanner, restoreHidden } = usePlanner();
+  const [showCalendar, setShowCalendar] = useState(false);
+  const today = dateKey(new Date());
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [visibleMonth, setVisibleMonth] = useState(() => new Date(`${today}T12:00:00`));
+  const [planName, setPlanName] = useState('');
+  const [editingPlanId, setEditingPlanId] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const { items, setItems, hiddenItems, savedPlans, savePlan, updatePlan, deletePlan, loadPlan, removeFromPlanner, hideFromPlanner, restoreHidden } = usePlanner();
   const { theme } = useTheme();
+  const days = useMemo(() => {
+    const first = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1);
+    const last = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 0);
+    const result = Array(first.getDay()).fill(null);
+    for (let day = 1; day <= last.getDate(); day += 1) result.push(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), day));
+    return result;
+  }, [visibleMonth]);
 
   const startEditingTime = (item) => {
     setEditingId(item.id);
@@ -58,8 +84,36 @@ export default function PlannerScreen() {
   };
 
   const handleSavePlan = () => {
-    savePlan();
-    Alert.alert('Plan saved', `${items.length} stops are saved to your day planner.`);
+    savePlan(planName, selectedDate);
+    setPlanName('');
+    Alert.alert('Plan saved', `${items.length} stops are saved for ${formatDate(selectedDate)}.`);
+  };
+
+  const beginEditPlan = (plan) => {
+    setEditingPlanId(plan.id);
+    setEditName(plan.name);
+    setEditDate(plan.date);
+  };
+
+  const finishEditPlan = (planId) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(editDate)) {
+      Alert.alert('Invalid date', 'Use a date in YYYY-MM-DD format.');
+      return;
+    }
+    updatePlan(planId, { name: editName, date: editDate });
+    setEditingPlanId(null);
+    setSelectedDate(editDate);
+  };
+
+  const selectCalendarDate = (date) => {
+    setSelectedDate(date);
+    const plan = savedPlans.find((savedPlan) => savedPlan.date === date);
+    if (plan) loadPlan(plan);
+  };
+
+  const removeSavedPlan = (planId) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    deletePlan(planId);
   };
 
   const renderSwipeActions = (item) => (
@@ -134,6 +188,53 @@ export default function PlannerScreen() {
             <View>
               <Text style={[styles.eyebrow, { color: theme.mutedText }]}>Your itinerary</Text>
               <Text style={[styles.title, { color: theme.text }]}>Day Planner</Text>
+              <Pressable
+                style={[styles.calendarToggle, { backgroundColor: theme.surface, borderColor: theme.border }]}
+                onPress={() => setShowCalendar((current) => !current)}
+              >
+                <View>
+                  <Text style={[styles.panelTitle, { color: theme.text }]}>Calendar itinerary</Text>
+                  <Text style={[styles.sectionMeta, { color: theme.mutedText }]}>Selected: {formatDate(selectedDate)}</Text>
+                </View>
+                <Text style={[styles.expandText, { color: theme.text }]}>{showCalendar ? 'Hide' : 'Show'}</Text>
+              </Pressable>
+              {showCalendar ? <View style={[styles.calendarCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <View style={styles.calendarHeader}>
+                  <Pressable style={styles.navButton} onPress={() => setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))}>
+                    <Text style={[styles.navText, { color: theme.text }]}>‹</Text>
+                  </Pressable>
+                  <Text style={[styles.monthTitle, { color: theme.text }]}>{MONTHS[visibleMonth.getMonth()]} {visibleMonth.getFullYear()}</Text>
+                  <Pressable style={styles.navButton} onPress={() => setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))}>
+                    <Text style={[styles.navText, { color: theme.text }]}>›</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.weekRow}>{WEEKDAYS.map((day) => <Text key={day} style={[styles.weekday, { color: theme.mutedText }]}>{day}</Text>)}</View>
+                <View style={styles.daysGrid}>
+                  {days.map((day, index) => {
+                    if (!day) return <View key={`empty-${index}`} style={styles.dayCell} />;
+                    const key = dateKey(day);
+                    const selected = selectedDate === key;
+                    const hasPlans = savedPlans.some((plan) => plan.date === key);
+                    return (
+                      <Pressable key={key} style={[styles.dayCell, selected && styles.selectedDay]} onPress={() => selectCalendarDate(key)}>
+                        <Text style={[styles.dayText, { color: selected ? '#FFFFFF' : theme.text }]}>{day.getDate()}</Text>
+                        {hasPlans ? <View style={[styles.planDot, { backgroundColor: selected ? '#FFFFFF' : '#4C6FFF' }]} /> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Pressable onPress={() => { setSelectedDate(today); setVisibleMonth(new Date(`${today}T12:00:00`)); }}>
+                  <Text style={styles.todayLink}>Jump to today</Text>
+                </Pressable>
+              </View> : null}
+              <View style={[styles.savePanel, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <Text style={[styles.panelTitle, { color: theme.text }]}>Plans for {formatDate(selectedDate)}</Text>
+                <Text style={[styles.sectionMeta, { color: theme.mutedText }]}>{items.length} current stop{items.length === 1 ? '' : 's'} will be saved.</Text>
+                <View style={styles.saveRow}>
+                  <TextInput value={planName} onChangeText={setPlanName} placeholder="Name this plan" placeholderTextColor="#94A3B8" style={[styles.planNameInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]} />
+                  <Pressable style={styles.saveButton} onPress={handleSavePlan}><Text style={styles.primaryText}>Save plan</Text></Pressable>
+                </View>
+              </View>
               <View style={styles.topActions}>
                 <Pressable style={styles.utilityButton} onPress={() => setShowSavedPlans(true)}>
                   <Text style={styles.utilityText}>View saved plans</Text>
@@ -173,14 +274,36 @@ export default function PlannerScreen() {
                 <Text style={[styles.modalTitle, { color: theme.text }]}>Saved plans</Text>
                 <Pressable onPress={() => setShowSavedPlans(false)}><Text style={[styles.closeText, { color: theme.text }]}>Close</Text></Pressable>
               </View>
-              {savedPlans.length === 0 ? (
-                <Text style={[styles.emptyText, { color: theme.mutedText }]}>No saved plans yet.</Text>
-              ) : savedPlans.map((plan) => (
-                <View key={plan.id} style={[styles.savedPlanRow, { borderColor: theme.border }]}>
-                  <Text style={[styles.savedPlanTitle, { color: theme.text }]}>{new Date(plan.savedAt).toLocaleString()}</Text>
-                  <Text style={[styles.savedPlanMeta, { color: theme.mutedText }]}>{plan.items.length} stops</Text>
+              {savedPlans.length === 0 ? <Text style={[styles.emptyText, { color: theme.mutedText }]}>No saved plans yet.</Text> : <ScrollView style={styles.savedPlansScroll} contentContainerStyle={styles.savedPlansContent}>
+                {savedPlans.map((plan) => (
+                <Swipeable key={plan.id} renderRightActions={() => (
+                  <View style={styles.planSwipeAction}><Text style={styles.actionText}>Remove</Text></View>
+                )} onSwipeableOpen={() => removeSavedPlan(plan.id)}>
+                <View style={[styles.savedPlanRow, { borderColor: theme.border }]}>
+                  {editingPlanId === plan.id ? (
+                    <View style={styles.editPlanFields}>
+                      <TextInput value={editName} onChangeText={setEditName} style={[styles.planNameInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]} />
+                      <TextInput value={editDate} onChangeText={setEditDate} placeholder="YYYY-MM-DD" autoCapitalize="none" style={[styles.dateInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]} />
+                    </View>
+                  ) : (
+                    <View style={styles.planInfo}>
+                      <Text style={[styles.savedPlanTitle, { color: theme.text }]}>{plan.name}</Text>
+                      <Text style={[styles.savedPlanMeta, { color: theme.mutedText }]}>{formatDate(plan.date)} · {plan.items.length} stops</Text>
+                    </View>
+                  )}
+                  <View style={styles.planActions}>
+                    {editingPlanId === plan.id ? <Pressable onPress={() => finishEditPlan(plan.id)}><Text style={styles.actionText}>Done</Text></Pressable> : (
+                      <>
+                        <Pressable onPress={() => { loadPlan(plan); setSelectedDate(plan.date); setShowSavedPlans(false); }}><Text style={styles.actionText}>Open</Text></Pressable>
+                        <Pressable onPress={() => beginEditPlan(plan)}><Text style={styles.actionText}>Edit</Text></Pressable>
+                      </>
+                    )}
+                    <Pressable onPress={() => removeSavedPlan(plan.id)}><Text style={styles.deleteText}>Remove</Text></Pressable>
+                  </View>
                 </View>
-              ))}
+                </Swipeable>
+                ))}
+              </ScrollView>}
             </View>
           </View>
         </Modal>
@@ -204,6 +327,44 @@ const styles = StyleSheet.create({
     color: '#152033',
     marginBottom: 18,
   },
+  calendarCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
+  },
+  calendarToggle: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  expandText: { fontSize: 13, fontWeight: '800' },
+  calendarHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  navButton: { paddingHorizontal: 12, paddingVertical: 4 },
+  navText: { fontSize: 30, lineHeight: 32 },
+  monthTitle: { fontSize: 19, fontWeight: '800' },
+  weekRow: { flexDirection: 'row', marginBottom: 6 },
+  weekday: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '700' },
+  daysGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  dayCell: { width: '14.2857%', minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
+  selectedDay: { backgroundColor: '#4C6FFF' },
+  dayText: { fontSize: 14, fontWeight: '700' },
+  planDot: { width: 5, height: 5, borderRadius: 3, marginTop: 3 },
+  todayLink: { color: '#4C6FFF', fontWeight: '700', textAlign: 'center', marginTop: 10 },
+  savePanel: { borderWidth: 1, borderRadius: 18, padding: 16, marginBottom: 16 },
+  sectionMeta: { fontSize: 13, marginTop: 4, marginBottom: 12 },
+  saveRow: { flexDirection: 'row', alignItems: 'center' },
+  planNameInput: { flex: 1, minHeight: 42, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, fontSize: 14 },
+  saveButton: { backgroundColor: '#4C6FFF', borderRadius: 10, paddingHorizontal: 14, minHeight: 42, justifyContent: 'center', marginLeft: 8 },
   topActions: {
     flexDirection: 'row',
     gap: 10,
@@ -443,6 +604,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 4,
   },
+  savedPlansScroll: { maxHeight: 360 },
+  savedPlansContent: { paddingBottom: 8 },
+  planSwipeAction: {
+    width: 92,
+    marginBottom: 1,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#B91C1C',
+  },
+  planInfo: { flex: 1 },
+  planActions: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10 },
+  editPlanFields: { width: '100%' },
+  dateInput: { minHeight: 40, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, fontSize: 13, marginTop: 8 },
+  deleteText: { color: '#B91C1C', fontWeight: '800', fontSize: 13 },
   emptyText: {
     fontSize: 15,
     textAlign: 'center',
